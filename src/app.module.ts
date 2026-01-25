@@ -9,6 +9,7 @@ import { HealthModule } from './health/health.module';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
+import { GeminiModule } from './ai-model-api/gemini/gemini.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     UserModule,
     HealthModule,
+    GeminiModule,
   ],
   controllers: [AppController],
   providers: [
@@ -33,4 +35,4 @@ import { PrismaModule } from './prisma/prisma.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
