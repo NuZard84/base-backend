@@ -29,27 +29,37 @@ export class AuthService {
           data: {
             email,
             name: profile.displayName || null,
-            picture: profile.photos?.[0]?.value || null,
+            image: profile.photos?.[0]?.value || null,
             googleId: profile.id,
+            lastLoginAt: new Date(),
           },
         });
         this.logger.log(`New user created: ${email}`);
+      } else {
+        // Update last login and potentially refresh profile picture
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            lastLoginAt: new Date(),
+            image: profile.photos?.[0]?.value || user.image,
+          },
+        });
       }
 
       const payload = {
         sub: user.id,
-        email: user.email ?? null,
+        email: user.email,
       };
 
-
       const accessToken = this.jwtService.sign(payload, {
-        expiresIn: String(process.env.EXPIRE_ACCESS_TOKEN),
+        expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN),
       });
       const refreshToken = this.jwtService.sign(payload, {
-        expiresIn: String(process.env.EXPIRE_REFRESH_TOKEN),
+        expiresIn: Number(process.env.EXPIRE_REFRESH_TOKEN),
       });
 
-      await this.prisma.user.update({
+      // Store refresh token in database for security
+      user = await this.prisma.user.update({
         where: { id: user.id },
         data: { refreshToken },
       });
@@ -57,7 +67,6 @@ export class AuthService {
       return { user, accessToken, refreshToken };
     } catch (error) {
       this.logger.error('Error validating Google user:', error);
-      await this.prisma.handleDatabaseError(error, 'validateGoogleUser');
       throw error;
     }
   }
@@ -80,7 +89,7 @@ export class AuthService {
 
       const newAccessToken = this.jwtService.sign(
         { sub: user.id, email: user.email },
-        { expiresIn: String(process.env.EXPIRE_ACCESS_TOKEN) },
+        { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
       );
 
       this.logger.log(`Access token refreshed for user: ${user.email}`);

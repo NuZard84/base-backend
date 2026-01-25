@@ -13,17 +13,16 @@ export class UserService {
     private redis: RedisService,
   ) { }
 
-  async updateName(userId: string, name: string) {
+  async updateProfile(userId: string, data: { name?: string; image?: string }) {
     try {
       const user = await this.prisma.user.update({
         where: { id: userId },
-        data: { name },
+        data,
       });
 
       return user;
     } catch (error) {
-      this.logger.error('Error updating name:', error);
-      await this.prisma.handleDatabaseError(error, 'updateName');
+      this.logger.error('Error updating profile:', error);
       throw error;
     }
   }

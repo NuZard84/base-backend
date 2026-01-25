@@ -1,20 +1,89 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id              String   @id @default(uuid())
-  email           String?  @unique
-  name            String?
-  picture         String?
-  refreshToken    String?
-  googleId        String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+generator client {
+  provider = "prisma-client-js"
 }
 
+// User Tiers for future pricing
+enum PlanTier {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+// Subscription Status for Billing Management (Stripe standard)
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  CANCELED
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  PAST_DUE
+  UNPAID
+  PAUSED
+}
+
+model User {
+  id       String  @id @default(uuid())
+  email    String  @unique
+  name     String?
+  image    String?
+  googleId String? @unique
+
+  plan           PlanTier           @default(FREE)
+  status         SubscriptionStatus @default(ACTIVE)
+  stripeId       String?            @unique
+  subscriptionId String?            @unique
+  refreshToken   String?
+
+  projects Project[]
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([email])
+  @@index([googleId])
+  @@map("users")
+}
+
+model Project {
+  id          String  @id @default(uuid())
+  name        String  @default("New Canvas")
+  description String?
+
+  nodes    Json  @default("[]")
+  edges    Json  @default("[]")
+  viewport Json? // Stores { x, y, zoom }
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  chatLogs ChatLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("projects")
+}
+
+model ChatLog {
+  id        String  @id @default(uuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  role      String // 'user' or 'assistant'
+  content   String  @db.Text
+  modelName String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@map("chat_logs")
+}
