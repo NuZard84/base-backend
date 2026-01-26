@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
 
 @Injectable()
 export class GeminiService {
+    private readonly logger = new Logger(GeminiService.name);
     private genAI: GoogleGenAI;
     private readonly aiInstruction = `# MISSION
 You are a high-performance AI assistant. Your goal is to provide responses that are not only accurate but "super-formatted" for maximum readability, professional polish, and instant scannability.
@@ -36,30 +37,52 @@ Follow this layout for all non-trivial queries:
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
         if (apiKey) {
             this.genAI = new GoogleGenAI({ apiKey });
+        } else {
+            this.logger.warn('GEMINI_API_KEY not found in environment variables');
         }
     }
 
     async generateContent(data: { prompt?: string; ask: string }, config?: { model?: string; responseLength?: string }) {
+
         if (!this.genAI) {
+            this.logger.error("Gemini AI not initialized - missing API key");
             return {
                 text: "AI Service is not configured. Please set GEMINI_API_KEY in your .env file.",
+                success: false,
             };
         }
+
         const referencePrompt = data.prompt ? `${data.prompt}\n\n above is the reference text, below is the question` : "";
         const promptText = `${referencePrompt} ${data.ask} ## RESPONSE LENGTH: ${config?.responseLength || "medium"}`;
 
         const modelName = config?.model || 'gemini-2.0-flash-lite';
 
-        const response = await this.genAI.models.generateContent({
-            model: modelName,
-            contents: [{ role: 'user', parts: [{ text: promptText }] }],
-            config: {
-                systemInstruction: this.aiInstruction,
-            },
-        });
 
-        return {
-            text: response.text,
-        };
+        try {
+            const response = await this.genAI.models.generateContent({
+                model: modelName,
+                contents: [{ role: 'user', parts: [{ text: promptText }] }],
+                config: {
+                    systemInstruction: this.aiInstruction,
+                },
+            });
+
+            if (!response.text || response.text === "") {
+                this.logger.warn('Empty response from Gemini API');
+                return {
+                    success: false,
+                    text: "AI Service is not able to generate response now. Please try again.",
+                };
+            }
+            this.logger.log(`Using model: ${modelName} Response is generated successfully`);
+
+            return {
+                success: true,
+                text: response.text,
+            };
+        } catch (error) {
+            this.logger.error(`Error generating content: ${error.message}`, error.stack);
+            throw error;
+        }
     }
 }

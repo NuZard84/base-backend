@@ -1,4 +1,4 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Logger } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
 
@@ -32,6 +32,7 @@ export class GeminiController {
         },
     })
     async generate(@Body() body: { data: { prompt?: string; ask: string }; config?: { model?: string; responseLength?: string } }) {
+
         return this.geminiService.generateContent(body.data, body.config);
     }
 }
