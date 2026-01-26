@@ -64,6 +64,8 @@ export class AuthService {
         data: { refreshToken },
       });
 
+      this.logger.log(`User validated: ${email}`);
+
       return { user, accessToken, refreshToken };
     } catch (error) {
       this.logger.error('Error validating Google user:', error);

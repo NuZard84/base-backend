@@ -4,6 +4,7 @@ import {
   Get,
   Post,
   Req,
+  Res,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -13,6 +14,8 @@ import { Throttle } from '@nestjs/throttler';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
+import { GoogleAuthGuard } from './google/google-auth.guard';
+
 @ApiTags('Authentication')
 @Controller('api/auth')
 export class AuthController {
@@ -21,17 +24,23 @@ export class AuthController {
   ) { }
 
   @Get('google')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Initiate Google OAuth login' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   googleLogin() { }
 
   @Get('callback/google')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Google OAuth callback handler' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  googleCallback(@Req() req) {
-    return req.user;
+  googleCallback(@Req() req, @Res() res) {
+    const { user, accessToken, refreshToken } = req.user;
+
+    // Redirect to frontend with tokens
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const redirectUrl = `${frontendUrl}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}&user=${encodeURIComponent(JSON.stringify(user))}`;
+
+    return res.redirect(redirectUrl);
   }
 
   @Post('refresh')

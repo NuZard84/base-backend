@@ -17,6 +17,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
+    // If headers are already sent, don't try to send another response
+    if (response.headersSent) {
+      return;
+    }
+
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Internal server error';
     let error = 'Internal Server Error';

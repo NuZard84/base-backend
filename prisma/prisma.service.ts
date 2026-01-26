@@ -9,8 +9,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 @Injectable()
 export class PrismaService
   extends PrismaClient
-  implements OnModuleInit, OnModuleDestroy
-{
+  implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
   async onModuleInit() {
@@ -18,8 +17,10 @@ export class PrismaService
       await this.$connect();
       this.logger.log('Database connected successfully');
     } catch (error) {
-      this.logger.error('Failed to connect to database:', error);
-      throw error;
+      this.logger.warn(
+        'Initial database connection failed. Prisma will retry on the first request.',
+      );
+      this.logger.debug('Connection error detail:', error);
     }
   }
 
