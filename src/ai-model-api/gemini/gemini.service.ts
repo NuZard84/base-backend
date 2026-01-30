@@ -42,7 +42,7 @@ Follow this layout for all non-trivial queries:
         }
     }
 
-    async generateContent(data: { prompt?: string; ask: string }, config?: { model?: string; responseLength?: string }) {
+    async generateContent(data: { prompt?: string; ask: string; type?: string }, config?: { model?: string; responseLength?: string }) {
 
         if (!this.genAI) {
             this.logger.error("Gemini AI not initialized - missing API key");
@@ -52,11 +52,24 @@ Follow this layout for all non-trivial queries:
             };
         }
 
-        const referencePrompt = data.prompt ? `${data.prompt}\n\n above is the reference text, below is the question` : "";
-        const promptText = `${referencePrompt} ${data.ask} ## RESPONSE LENGTH: ${config?.responseLength || "medium"}`;
+        let referencePrompt: string = ''
+        let promptText: string = ''
+        let modelName: string = ''
 
-        const modelName = config?.model || 'gemini-2.0-flash-lite';
+        switch (data.type) {
+            case 'summarize':
+                promptText = `${data.ask} above is the video link, I want you to summarize the video content ## RESPONSE LENGTH: ${config?.responseLength || 'medium'}`
+                modelName = config?.model || 'gemini-2.0-flash-lite'
+                break
 
+            default:
+                referencePrompt = data.prompt
+                    ? `${data.prompt}\n\n above is the reference text, below is the question`
+                    : ''
+                promptText = `${referencePrompt} ${data.ask} ## RESPONSE LENGTH: ${config?.responseLength || 'medium'}`
+                modelName = config?.model || 'gemini-2.0-flash-lite'
+                break
+        }
 
         try {
             const response = await this.genAI.models.generateContent({
@@ -74,7 +87,6 @@ Follow this layout for all non-trivial queries:
                     text: "AI Service is not able to generate response now. Please try again.",
                 };
             }
-            this.logger.log(`Using model: ${modelName} Response is generated successfully`);
 
             return {
                 success: true,

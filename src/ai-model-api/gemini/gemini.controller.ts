@@ -18,6 +18,7 @@ export class GeminiController {
                     properties: {
                         prompt: { type: 'string', example: 'Context about the request' },
                         ask: { type: 'string', example: 'What is a bit?' },
+                        type: { type: 'string', example: 'summarize' },
                     },
                     required: ['ask'],
                 },
@@ -31,7 +32,7 @@ export class GeminiController {
             },
         },
     })
-    async generate(@Body() body: { data: { prompt?: string; ask: string }; config?: { model?: string; responseLength?: string } }) {
+    async generate(@Body() body: { data: { prompt?: string; ask: string; type?: string }; config?: { model?: string; responseLength?: string } }) {
 
         return this.geminiService.generateContent(body.data, body.config);
     }
