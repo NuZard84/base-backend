@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dto/update-user.dto';

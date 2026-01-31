@@ -4,10 +4,12 @@ datasource db {
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
-// User Tiers for future pricing
+// --- ENUMS ---
+
 enum PlanTier {
   FREE
   STARTER
@@ -15,17 +17,45 @@ enum PlanTier {
   ENTERPRISE
 }
 
-// Subscription Status for Billing Management (Stripe standard)
 enum SubscriptionStatus {
-  TRIALING
   ACTIVE
-  CANCELED
-  INCOMPLETE
-  INCOMPLETE_EXPIRED
-  PAST_DUE
-  UNPAID
+  TRIALING
   PAUSED
+  CANCELED
 }
+
+enum NodeRole {
+  INPUT
+  OUTPUT
+  GROUP
+}
+
+enum NodeType {
+  QUESTION
+  IMAGE
+  VIDEO
+  PDF
+  CODE
+  TEXT
+  EMBED
+  RESPONSE
+}
+
+enum EdgeType {
+  MANUAL
+  GENERATED
+  REFERENCE
+  PARENT_CHILD
+}
+
+enum ConversationStatus {
+  PENDING
+  STREAMING
+  COMPLETED
+  FAILED
+}
+
+// --- CORE MODELS ---
 
 model User {
   id       String  @id @default(uuid())
@@ -38,9 +68,11 @@ model User {
   status         SubscriptionStatus @default(ACTIVE)
   stripeId       String?            @unique
   subscriptionId String?            @unique
-  refreshToken   String?
 
-  projects Project[]
+  refreshToken String?
+
+  canvases  Canvas[]
+  usageLogs UsageLog[]
 
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
@@ -48,42 +80,181 @@ model User {
 
   @@index([email])
   @@index([googleId])
+  @@index([plan])
   @@map("users")
 }
 
-model Project {
+model Canvas {
   id          String  @id @default(uuid())
-  name        String  @default("New Canvas")
+  name        String
   description String?
 
-  nodes    Json  @default("[]")
-  edges    Json  @default("[]")
-  viewport Json? // Stores { x, y, zoom }
+  boundsMinX Float @default(0)
+  boundsMinY Float @default(0)
+  boundsMaxX Float @default(0)
+  boundsMaxY Float @default(0)
 
-  // Relations
+  viewportX    Float?
+  viewportY    Float?
+  viewportZoom Float? @default(1)
+
+  nodeCount Int @default(0)
+  edgeCount Int @default(0)
+
+  isPublic Boolean @default(false)
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  chatLogs ChatLog[]
+  nodes         Node[]
+  edges         Edge[]
+  snapshots     CanvasSnapshot[]
+  conversations AIConversation[]
+
+  lastAccessedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([isPublic])
+  @@map("canvases")
+}
+
+model Node {
+  id       String @id @default(uuid())
+  canvasId String
+  canvas   Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+
+  x      Float
+  y      Float
+  width  Float @default(360)
+  height Float @default(240)
+  zIndex Int   @default(0)
+
+  bbox    Unsupported("box")?
+  tileIds Int[]               @default([])
+
+  role     NodeRole
+  nodeType NodeType
+
+  title    String?                  @db.VarChar(512)
+  titleTsv Unsupported("tsvector")?
+
+  content  Json @default("{}")
+  metadata Json @default("{}")
+  style    Json @default("{}")
+
+  parentNodeId String?
+  parent       Node?   @relation("NodeTree", fields: [parentNodeId], references: [id], onDelete: SetNull)
+  children     Node[]  @relation("NodeTree")
+
+  isLocked    Boolean @default(false)
+  isCollapsed Boolean @default(false)
+
+  conversations AIConversation[]
+
+  outgoingEdges Edge[] @relation("EdgeSource")
+  incomingEdges Edge[] @relation("EdgeTarget")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId])
-  @@map("projects")
+  @@index([canvasId, role])
+  @@index([canvasId, nodeType])
+  @@index([parentNodeId])
+  @@map("nodes")
 }
 
-model ChatLog {
-  id        String  @id @default(uuid())
-  projectId String
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+model Edge {
+  id       String @id @default(uuid())
+  canvasId String
+  canvas   Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
 
-  role      String // 'user' or 'assistant'
-  content   String  @db.Text
-  modelName String?
+  sourceNodeId String
+  sourceNode   Node   @relation("EdgeSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+
+  targetNodeId String
+  targetNode   Node   @relation("EdgeTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+
+  edgeType EdgeType @default(MANUAL)
+
+  metadata Json @default("{}")
+  style    Json @default("{}")
 
   createdAt DateTime @default(now())
 
-  @@index([projectId])
-  @@map("chat_logs")
+  @@unique([canvasId, sourceNodeId, targetNodeId, edgeType])
+  @@index([canvasId])
+  @@index([sourceNodeId, targetNodeId])
+  @@map("edges")
+}
+
+// --- AI & ANALYTICS ---
+
+model AIConversation {
+  id       String @id @default(uuid())
+  nodeId   String
+  canvasId String
+
+  node   Node   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  canvas Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+
+  prompt       String  @db.Text
+  systemPrompt String? @db.Text
+  model        String  @db.VarChar(100)
+
+  response String? @db.Text
+
+  tokensPrompt   Int?
+  tokensResponse Int?
+  tokensTotal    Int?
+  costUsd        Decimal? @db.Decimal(10, 6)
+
+  latencyMs Int?
+
+  status       ConversationStatus @default(PENDING)
+  errorMessage String?            @db.Text
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([nodeId, createdAt(sort: Desc)])
+  @@index([canvasId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("ai_conversations")
+}
+
+model CanvasSnapshot {
+  id       String @id @default(uuid())
+  canvasId String
+  canvas   Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+
+  snapshotData Json
+  nodeCount    Int
+
+  createdBy   String
+  description String?
+
+  createdAt DateTime @default(now())
+
+  @@index([canvasId, createdAt(sort: Desc)])
+  @@map("canvas_snapshots")
+}
+
+model UsageLog {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  resourceType String
+  quantity     Int      @default(1)
+  costUsd      Decimal? @db.Decimal(10, 6)
+
+  metadata Json @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([resourceType, createdAt(sort: Desc)])
+  @@map("usage_logs")
 }
