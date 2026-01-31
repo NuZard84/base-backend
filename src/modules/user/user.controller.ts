@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards, Delete } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service';
@@ -30,6 +30,14 @@ export class UserController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   updateProfile(@Body() body: UpdateUserDto, @Req() req) {
     return this.userService.updateProfile(req.user.userId, body);
+  }
+
+  @Delete('delete')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Delete current user account' })
+  @ApiResponse({ status: 200, description: 'User account deleted successfully' })
+  deleteAccount(@Req() req) {
+    return this.userService.deleteAccount(req.user.userId);
   }
 }
 

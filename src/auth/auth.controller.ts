@@ -61,5 +61,13 @@ export class AuthController {
       throw new UnauthorizedException('Token refresh failed');
     }
   }
+
+  @Post('guest')
+  @ApiOperation({ summary: 'Create a guest user and return tokens' })
+  @ApiResponse({ status: 201, description: 'Guest user created successfully' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async createGuest() {
+    return this.authService.createGuestUser();
+  }
 }
 

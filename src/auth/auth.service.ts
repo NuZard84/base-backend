@@ -2,6 +2,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AuthService {
@@ -102,6 +103,49 @@ export class AuthService {
         throw error;
       }
       throw new UnauthorizedException('Token refresh failed');
+    }
+  }
+
+  async createGuestUser() {
+    try {
+
+      const uniqueId = uuidv4();
+      const email = `guest_${uniqueId}@pixelpioneers.ai`;
+
+      const user = await this.prisma.user.create({
+        data: {
+          email,
+          image: null,
+          googleId: null,
+          name: 'Guest User',
+          plan: 'FREE',
+        },
+      });
+
+      const payload = {
+        sub: user.id,
+        email: user.email,
+      };
+
+      const accessToken = this.jwtService.sign(payload, {
+        expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN),
+      });
+      const refreshToken = this.jwtService.sign(payload, {
+        expiresIn: Number(process.env.EXPIRE_REFRESH_TOKEN),
+      });
+
+      // Store refresh token
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { refreshToken },
+      });
+
+      this.logger.log(`Guest user created: ${email}`);
+
+      return { user, accessToken, refreshToken };
+    } catch (error) {
+      this.logger.error('Error creating guest user:', error);
+      throw error;
     }
   }
 }

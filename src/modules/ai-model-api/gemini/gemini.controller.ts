@@ -1,8 +1,10 @@
-import { Controller, Post, Body, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Logger, UseGuards } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
 @ApiTags('AI Gemini')
+@UseGuards(JwtAuthGuard)
 @Controller('ai/gemini')
 export class GeminiController {
     constructor(private readonly geminiService: GeminiService) { }

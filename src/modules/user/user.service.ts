@@ -26,5 +26,21 @@ export class UserService {
       throw error;
     }
   }
+
+  async deleteAccount(userId: string) {
+    try {
+      await this.prisma.user.delete({
+        where: { id: userId },
+      });
+      // Optionally clear session from redis if you are storing it there
+      // await this.redis.del(`user:${userId}`); 
+
+      this.logger.log(`User deleted: ${userId}`);
+      return { message: 'User deleted successfully' };
+    } catch (error) {
+      this.logger.error('Error deleting user:', error);
+      throw error;
+    }
+  }
 }
 
