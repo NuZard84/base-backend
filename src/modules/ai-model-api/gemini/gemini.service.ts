@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
+import { AiRequestData, AiRequestConfig, AiResponse, queryType } from '../types';
 
 @Injectable()
 export class GeminiService {
@@ -42,7 +43,7 @@ Follow this layout for all non-trivial queries:
         }
     }
 
-    async generateContent(data: { prompt?: string; ask: string; type?: string }, config?: { model?: string; responseLength?: string }) {
+    async generateContent(data: AiRequestData, config?: AiRequestConfig): Promise<AiResponse> {
 
         if (!this.genAI) {
             this.logger.error("Gemini AI not initialized - missing API key");
@@ -57,7 +58,7 @@ Follow this layout for all non-trivial queries:
         let modelName: string = ''
 
         switch (data.type) {
-            case 'summarize':
+            case queryType.VID_SUMMARIZE:
                 promptText = `${data.ask} above is the video link, I want you to summarize the video content ## RESPONSE LENGTH: ${config?.responseLength || 'medium'}`
                 modelName = config?.model || 'gemini-2.0-flash-lite'
                 break
@@ -70,7 +71,7 @@ Follow this layout for all non-trivial queries:
                 modelName = config?.model || 'gemini-2.0-flash-lite'
                 break
         }
-
+        this.logger.log(`Generating content with model: ${modelName} and type: ${data.type}`);
         try {
             const response = await this.genAI.models.generateContent({
                 model: modelName,

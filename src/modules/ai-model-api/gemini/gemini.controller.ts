@@ -3,6 +3,8 @@ import { GeminiService } from './gemini.service';
 import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
+import { AiRequestData, AiRequestConfig } from '../types';
+
 @ApiTags('AI Gemini')
 @UseGuards(JwtAuthGuard)
 @Controller('ai/gemini')
@@ -34,7 +36,7 @@ export class GeminiController {
             },
         },
     })
-    async generate(@Body() body: { data: { prompt?: string; ask: string; type?: string }; config?: { model?: string; responseLength?: string } }) {
+    async generate(@Body() body: { data: AiRequestData; config?: AiRequestConfig }) {
 
         return this.geminiService.generateContent(body.data, body.config);
     }
