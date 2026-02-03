@@ -10,14 +10,15 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { GeminiModule } from './modules/ai-model-api/gemini/gemini.module';
+import { CanvasesModule } from './modules/canvases/canvases.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([
       {
-        ttl: 60000, // 1 minute
-        limit: 100, // 100 requests per minute globally
+        ttl: 60000,
+        limit: 100,
       },
     ]),
     PrismaModule,
@@ -25,6 +26,7 @@ import { GeminiModule } from './modules/ai-model-api/gemini/gemini.module';
     UserModule,
     HealthModule,
     GeminiModule,
+    CanvasesModule,
   ],
   controllers: [AppController],
   providers: [
