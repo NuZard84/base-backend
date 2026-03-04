@@ -1,6 +1,20 @@
-import { Controller, Post, Body, UseGuards, Req, Get, Param, Patch, Delete } from '@nestjs/common';
+import {
+    Controller,
+    Post,
+    Body,
+    UseGuards,
+    Req,
+    Get,
+    Param,
+    Patch,
+    Delete,
+    Put,
+    Query,
+} from '@nestjs/common';
 import { CreateCanvasDto } from './dto/create-canvas.dto';
 import { RenameCanvasDto } from './dto/rename-canvas.dto';
+import { SyncCanvasDto } from './dto/sync-node.dto';
+import { ViewportQueryDto } from './dto/viewport-query.dto';
 import { CanvasesService } from './canvases.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
@@ -9,7 +23,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagg
 @ApiBearerAuth()
 @Controller('canvases')
 export class CanvasesController {
-    constructor(private readonly canvasesService: CanvasesService) { }
+    constructor(private readonly canvasesService: CanvasesService) {}
 
     @Post()
     @UseGuards(JwtAuthGuard)
@@ -27,13 +41,35 @@ export class CanvasesController {
         return this.canvasesService.findAll(req.user.userId);
     }
 
+    @Get(':id/nodes')
+    @UseGuards(JwtAuthGuard)
+    @ApiOperation({ summary: 'Get nodes in viewport (spatial query for large canvases)' })
+    @ApiResponse({ status: 200, description: 'Return nodes in viewport or by tile IDs.' })
+    @ApiResponse({ status: 404, description: 'Canvas not found.' })
+    findNodesInViewport(
+        @Req() req,
+        @Param('id') id: string,
+        @Query() query: ViewportQueryDto,
+    ) {
+        return this.canvasesService.findNodesInViewport(req.user.userId, id, query);
+    }
+
     @Get(':id')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Get a specific canvas by ID' })
+    @ApiOperation({ summary: 'Get a specific canvas by ID (full nodes + edges)' })
     @ApiResponse({ status: 200, description: 'Return the canvas.' })
     @ApiResponse({ status: 404, description: 'Canvas not found.' })
     findOne(@Req() req, @Param('id') id: string) {
         return this.canvasesService.findOne(req.user.userId, id);
+    }
+
+    @Put(':id/sync')
+    @UseGuards(JwtAuthGuard)
+    @ApiOperation({ summary: 'Bulk sync nodes and edges (atomic upsert)' })
+    @ApiResponse({ status: 200, description: 'Sync completed. Returns nodeIdMap for frontend.' })
+    @ApiResponse({ status: 404, description: 'Canvas not found.' })
+    sync(@Req() req, @Param('id') id: string, @Body() dto: SyncCanvasDto) {
+        return this.canvasesService.sync(req.user.userId, id, dto);
     }
 
     @Patch(':id/rename')

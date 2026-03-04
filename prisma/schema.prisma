@@ -39,6 +39,8 @@ enum NodeType {
   TEXT
   EMBED
   RESPONSE
+  COMMENT
+  NOTES
 }
 
 enum EdgeType {
@@ -123,6 +125,7 @@ model Node {
   id       String @id @default(uuid())
   canvasId String
   canvas   Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  clientId String? // Frontend ID for idempotent sync (e.g. "1709123456789")
 
   x      Float
   y      Float
@@ -130,14 +133,17 @@ model Node {
   height Float @default(240)
   zIndex Int   @default(0)
 
-  bbox    Unsupported("box")?
-  tileIds Int[]               @default([])
+  // Bounding box for spatial queries (computed from x,y,width,height)
+  bboxMinX Float?
+  bboxMinY Float?
+  bboxMaxX Float?
+  bboxMaxY Float?
+  tileIds  Int[] @default([])
 
-  role     NodeRole
+  role     NodeRole @default(INPUT)
   nodeType NodeType
 
-  title    String?                  @db.VarChar(512)
-  titleTsv Unsupported("tsvector")?
+  title    String? @db.VarChar(512)
 
   content  Json @default("{}")
   metadata Json @default("{}")
@@ -158,8 +164,10 @@ model Node {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([canvasId, clientId])
   @@index([canvasId, role])
   @@index([canvasId, nodeType])
+  @@index([canvasId, bboxMinX, bboxMaxX, bboxMinY, bboxMaxY])
   @@index([parentNodeId])
   @@map("nodes")
 }

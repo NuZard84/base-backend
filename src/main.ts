@@ -35,9 +35,16 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  // Simplified CORS configuration for development
+  // CORS configuration
+  const frontendUrl = process.env.FRONTEND_URL;
+  const allowedOrigins = frontendUrl
+    ? frontendUrl.split(',').map((url) => url.trim())
+    : process.env.NODE_ENV === 'production'
+      ? []
+      : true; // Allow all in development
+
   app.enableCors({
-    origin: true, // Allow all origins in development
+    origin: allowedOrigins,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     credentials: true,
     optionsSuccessStatus: 200,
@@ -51,7 +58,12 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(process.env.PORT ?? 3000);
-  console.log(`🚀 Server running on port ${process.env.PORT ?? 3000}`);
+  const port = Number(process.env.PORT) || 8080;
+  await app.listen(port, '0.0.0.0'); // Cloud Run requires listening on 0.0.0.0
+  console.log(`🚀 Server running on port ${port}`);
 }
-bootstrap();
+
+bootstrap().catch((err) => {
+  console.error('Failed to start:', err);
+  process.exit(1);
+});

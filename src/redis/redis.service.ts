@@ -8,48 +8,72 @@ import Redis from 'ioredis';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
-  private redis: Redis;
+  private redis: Redis | null = null;
   private readonly logger = new Logger(RedisService.name);
 
   onModuleInit() {
+    const host = process.env.REDIS_HOST;
+    const port = process.env.REDIS_PORT;
+    if (!host || !port) {
+      this.logger.warn(
+        'Redis not configured (REDIS_HOST/REDIS_PORT missing). Redis operations will no-op.',
+      );
+      return;
+    }
     this.redis = new Redis({
-      host: process.env.REDIS_HOST,
-      port: Number(process.env.REDIS_PORT),
+      host,
+      port: Number(port),
       password: process.env.REDIS_PASSWORD,
       retryStrategy: (times) => Math.min(times * 50, 2000),
+      connectTimeout: 5000,
+      maxRetriesPerRequest: 2,
     });
 
     this.redis.on('connect', () => this.logger.log('Redis connected'));
     this.redis.on('error', (err) => this.logger.error('Redis error:', err));
   }
 
+  private guard() {
+    if (!this.redis) {
+      throw new Error('Redis is not configured. Set REDIS_HOST and REDIS_PORT.');
+    }
+  }
+
   async set(key: string, value: string, ttl: number) {
-    await this.redis.set(key, value, 'EX', ttl);
+    this.guard();
+    await this.redis!.set(key, value, 'EX', ttl);
   }
 
   async get(key: string) {
-    return await this.redis.get(key);
+    this.guard();
+    return await this.redis!.get(key);
   }
 
   async del(key: string) {
-    await this.redis.del(key);
+    this.guard();
+    await this.redis!.del(key);
   }
 
   async expire(key: string, ttl: number) {
-    await this.redis.expire(key, ttl);
+    this.guard();
+    await this.redis!.expire(key, ttl);
   }
 
   async incr(key: string) {
-    return await this.redis.incr(key);
+    this.guard();
+    return await this.redis!.incr(key);
   }
 
   async exists(key: string) {
-    const result = await this.redis.exists(key);
+    this.guard();
+    const result = await this.redis!.exists(key);
     return result === 1;
   }
 
   onModuleDestroy() {
-    this.redis.quit();
-    this.logger.log('Redis disconnected');
+    if (this.redis) {
+      this.redis.quit();
+      this.logger.log('Redis disconnected');
+    }
   }
 }
