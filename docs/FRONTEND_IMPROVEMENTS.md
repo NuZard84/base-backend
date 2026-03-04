@@ -1,6 +1,6 @@
 # Frontend Canvas — Improvement Plan
 
-Plan to improve client-side performance, storage, and scalability for the canvas frontend.
+Plan to improve client-side performance, storage, and scalability.
 
 ---
 
@@ -11,44 +11,32 @@ Plan to improve client-side performance, storage, and scalability for the canvas
 | **Full nodes/edges in localStorage** | 5–10MB limit hit; slow parse/reload; large JSON | `partialize` persists entire `projects` (including nodes, edges) |
 | **Duplicate storage** | Higher memory use | Same data in React state + Zustand |
 | **Full canvas fetch on load** | Slow initial load; overfetch | Always `GET /canvases/:id` (all nodes/edges) |
-| **No viewport-based loading** | Poor scaling | Viewport API exists but is unused |
+| **No viewport-based loading** | Poor scaling for large canvases | Viewport API exists but is unused |
 | **All nodes rendered** | Slower UI with many nodes | React Flow renders everything |
 
 ---
 
 ## 2. Improvement Tiers
 
-### Tier 1 — Quick wins (low effort, immediate impact)
-
-Stop persisting nodes/edges for backend projects.
-
-### Tier 2 — Medium effort (better caching & load)
-
-Separate metadata from content; smarter persistence.
-
-### Tier 3 — Larger changes (viewport loading)
-
-Viewport-based loading for large canvases.
+| Tier | Effort | Goal |
+|------|--------|------|
+| **1** | Low | Don't persist nodes/edges for backend projects |
+| **2** | Medium | Separate metadata from content; smarter persistence |
+| **3** | High | Viewport-based loading for large canvases |
 
 ---
 
-## 3. Tier 1: Don’t Persist Backend Nodes/Edges
+## 3. Tier 1: Don't Persist Backend Nodes/Edges
 
-**Goal:** Avoid storing full canvas data in localStorage for backend projects.
+### Problem
 
-### 3.1 Problem
+`useCanvasStore` persists `projects` and `activeProject`. Each project can have large `nodes` and `edges` arrays stored in localStorage.
 
-`useCanvasStore` persists `projects` and `activeProject`. Each project can have large `nodes` and `edges` arrays.
-
-### 3.2 Approach
+### Solution
 
 Exclude `nodes` and `edges` from persisted data for backend projects (where `id` is a string UUID).
 
-### 3.3 Implementation
-
 **File:** `base/src/store/useCanvasStore.ts`
-
-**Option A — Slim projects before persist**
 
 ```ts
 partialize: (state) => ({
@@ -69,109 +57,117 @@ partialize: (state) => ({
 }),
 ```
 
-**Option B — Custom `storage` with a `reviver`**
+### Load Flow
 
-- On save: omit nodes/edges for backend projects.
-- On load: hydrate from API when a backend project becomes active.
-
-### 3.4 Load Flow Change
-
-When rehydrating from localStorage, backend projects have `nodes: []`, `edges: []`. The existing logic already handles that:
+When rehydrating from localStorage, backend projects have `nodes: []`, `edges: []`. Existing logic handles this:
 
 ```ts
 if (activeProject.nodes?.length || activeProject.edges?.length) {
   setNodes(activeProject.nodes || []);
-  setEdges(activeProject.edges || []);
   return;
 }
 if (isBackendProject(activeProject.id)) {
-  loadCanvasContent(activeProject.id as string)...
+  loadCanvasContent(activeProject.id as string)... // Re-fetch
 }
 ```
 
-So backend projects will re-fetch on tab reload.
+### Outcome
 
-### 3.5 Outcome
-
-- localStorage usage drops for backend projects.
-- Rehydration faster.
-- Offline restore of backend canvases is lost (acceptable; they’re always fetched when online).
+- localStorage usage drops significantly for backend projects
+- Rehydration faster
+- Backend projects always fresh on reload
 
 ---
 
-## 4. Tier 2: Separate Metadata From Content
+## 4. Tier 2: Metadata-Only Persistence
 
-**Goal:** Store only essential data in Zustand; treat nodes/edges as transient.
+### Problem
 
-### 4.1 Project Shape
+Even with Tier 1, `updateProject` writes nodes/edges to Zustand, which can cause memory overhead.
 
-**Current:** `Project` includes `nodes`, `edges`, etc., all persisted.
+### Solution
 
-**Proposed:**
+Store only metadata in Zustand for backend projects:
 
-- **Metadata (persisted):** `id`, `name`, `description`, `nodeCount`, `edgeCount`, `time`, `boundsMinX/Y`, `boundsMaxX/Y`, `viewportX/Y/Zoom`.
-- **Content (in-memory only):** `nodes`, `edges`.
+**Metadata (persisted):** `id`, `name`, `description`, `nodeCount`, `edgeCount`, `time`, `boundsMinX/Y`, `boundsMaxX/Y`, `viewportX/Y/Zoom`
 
-### 4.2 Changes
+**Content (in-memory only):** `nodes`, `edges` stay in React Flow state only
 
-1. **partialize:** Persist only metadata; never persist `nodes` or `edges`.
-2. **updateProject:** Continue updating `nodes`/`edges` in memory for UI; they are not written to localStorage.
-3. **Single source of truth:** Keep React Flow’s nodes/edges as the primary in-memory source. Zustand can hold metadata only for backend projects.
+### Changes
 
-### 4.3 Caching Strategy
+1. `partialize`: Never persist `nodes` or `edges` for any backend project
+2. `updateProject`: For backend projects, only update metadata fields
+3. Optional: Add in-memory LRU cache for last 2–3 viewed canvases
 
-- Backend project open → fetch full canvas → store in memory (e.g. React state or a non-persisted cache).
-- On project switch away → optionally keep a small LRU cache in memory (e.g. last 2–3 canvases).
-- No localStorage for canvas content.
+### Outcome
+
+- Single source of truth: React Flow state for nodes/edges
+- Zustand holds only metadata for backend projects
+- Faster state updates
 
 ---
 
 ## 5. Tier 3: Viewport-Based Loading
 
-**Goal:** Load only nodes in the visible viewport for large canvases.
+### Problem
 
-### 5.1 When to Use
+Large canvases (100+ nodes) load all nodes at once, causing slow initial fetch and rendering.
 
-- Enable for canvases where `nodeCount` exceeds a threshold (e.g. 50–100).
-- Keep full load for small canvases.
+### Solution
 
-### 5.2 Flow
+Load only nodes in the visible viewport; fetch more as user pans/zooms.
+
+### When to Use
+
+Enable when `nodeCount > 100` (configurable threshold).
+
+### Flow
 
 ```
-1. Switch to backend project
-2. If nodeCount > THRESHOLD:
-   a. Fetch canvas metadata + edges (new endpoint or existing with nodes: [])
-   b. Get viewport (initial or stored)
-   c. loadNodesInViewport(canvasId, { minX, minY, maxX, maxY })
-   d. setNodes(viewportNodes), setEdges(allEdges)
-3. On viewport change (pan/zoom):
-   a. Debounce 150–300ms
-   b. Compute new bbox
-   c. loadNodesInViewport → merge into nodes
-   d. Optionally unload nodes outside viewport + margin
+1. Switch to large canvas
+2. Fetch canvas metadata + all edges
+3. loadNodesInViewport(canvasId, { minX, minY, maxX, maxY })
+4. setNodes(viewportNodes), setEdges(allEdges)
+5. On pan/zoom (debounced 200ms):
+   - Compute new bbox
+   - loadNodesInViewport → merge into nodes
+   - Optionally unload nodes outside viewport + margin
 ```
 
-### 5.3 Fix loadNodesInViewport
+### 5.1 Fix loadNodesInViewport Bug
 
 **File:** `base/src/app/hooks/useCanvasApi.ts`
 
-Backend returns `nodeType` (e.g. `QUESTION`, `RESPONSE`). React Flow needs `QuestionNode`, `ResponseNode`. Use `backendNodeToReactFlow` from canvasApi (reuse existing mapping):
+**Issue:** Backend returns `nodeType` as enum (`QUESTION`, `RESPONSE`). React Flow needs `QuestionNode`, `ResponseNode`.
+
+**Fix:** Use `backendNodeToReactFlow`:
 
 ```ts
 import { backendNodeToReactFlow } from '@/lib/canvasApi';
 
-// In loadNodesInViewport:
-return backendNodes.map((n) => backendNodeToReactFlow(n));
+const loadNodesInViewport = useCallback(
+  async (canvasId: string, params?: { minX?: number; minY?: number; maxX?: number; maxY?: number; tileIds?: number[] }): Promise<Node[]> => {
+    if (!isAuthenticated) return [];
+    setError(null);
+    try {
+      const backendNodes = await fetchNodesInViewport(canvasId, params);
+      return backendNodes.map((n) => backendNodeToReactFlow(n)); // FIX: Use proper mapping
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load nodes';
+      setError(msg);
+      return [];
+    }
+  },
+  [isAuthenticated]
+);
 ```
 
-Or export `NODE_TYPE_TO_FRONTEND` from `canvasApi.ts` and map `type` manually.
+### 5.2 Viewport → Bbox Helper
 
-### 5.4 Viewport → Bbox Helper
-
-**File:** `base/src/lib/canvasApi.ts` or a new `useViewportBbox` hook
+**File:** `base/src/lib/canvasApi.ts`
 
 ```ts
-export function viewportToBbox(viewport: { x: number; y: number; zoom: number }, padding = 100) {
+export function viewportToBbox(viewport: { x: number; y: number; zoom: number }, padding = 200) {
   const minX = (-viewport.x - padding) / viewport.zoom;
   const minY = (-viewport.y - padding) / viewport.zoom;
   const maxX = minX + (window.innerWidth + padding * 2) / viewport.zoom;
@@ -180,57 +176,63 @@ export function viewportToBbox(viewport: { x: number; y: number; zoom: number },
 }
 ```
 
-### 5.5 React Flow onViewportChange
+### 5.3 onViewportChange
 
 **File:** `base/src/app/draw/page.tsx`
 
 ```tsx
-const onViewportChange = useCallback(({ x, y, zoom }) => {
-  if (!isBackendProject(activeProject?.id) || nodeCount <= VIEWPORT_THRESHOLD) return;
-  // Debounced loadNodesInViewport with { minX, minY, maxX, maxY }
-}, [activeProject, nodeCount]);
+const debouncedViewportLoad = useDebounceCallback((viewport) => {
+  if (!isBackendProject(activeProject?.id) || nodeCount <= 100) return;
+  const bbox = viewportToBbox(viewport);
+  loadNodesInViewport(activeProject.id, bbox).then((newNodes) => {
+    setNodes((prev) => mergeNodes(prev, newNodes));
+  });
+}, 200);
+
+// In ReactFlow:
+<ReactFlow onViewportChange={debouncedViewportLoad} ... />
 ```
 
-### 5.6 Edge Handling
+### 5.4 Edge Handling
 
-- Viewport endpoint returns nodes only.
-- Edges reference nodes by id; options:
-  - **A:** Fetch full edges once when entering viewport mode (`GET /canvases/:id` with a “metadata only” option).
-  - **B:** Filter edges client-side to those whose `source`/`target` are in loaded nodes (some edges may be missing until both ends are loaded).
-  - **C:** New backend endpoint that returns edges for given node IDs.
+**Option A (Recommended):** Fetch all edges once on load (edges are usually fewer than nodes).
 
-### 5.7 Merge / Unload Strategy
+**Option B:** Filter edges client-side to visible nodes only (some edges may be hidden until both endpoints load).
 
-- **Merge:** New viewport nodes merged by `id`; existing nodes updated.
-- **Unload:** Optionally remove nodes outside `viewport + margin` to cap memory.
-- **Debounce:** ~200–300ms on viewport change to avoid too many API calls.
+### 5.5 Merge Strategy
+
+```ts
+function mergeNodes(existing: Node[], incoming: Node[]): Node[] {
+  const map = new Map(existing.map(n => [n.id, n]));
+  incoming.forEach(n => map.set(n.id, n));
+  return Array.from(map.values());
+}
+```
+
+**Optional unload:** Remove nodes outside `viewport + margin * 2` to cap memory.
 
 ---
 
 ## 6. Implementation Checklist
 
-### Tier 1 (Quick)
+### Tier 1 (Quick Win)
+- [ ] Update `useCanvasStore` partialize to exclude nodes/edges for backend projects
+- [ ] Test: backend project load, switch, refresh
+- [ ] Verify localStorage size reduction
 
-- [ ] Update `useCanvasStore` partialize to exclude nodes/edges for backend projects.
-- [ ] Re-test: backend project load, switch, refresh.
-- [ ] Check localStorage size before/after.
+### Tier 2 (Metadata Only)
+- [ ] Refactor partialize to persist only metadata fields
+- [ ] Update `updateProject` to skip nodes/edges for backend projects
+- [ ] Optional: Add in-memory LRU cache
 
-### Tier 2 (Medium)
-
-- [ ] Define clear Project metadata vs content schema.
-- [ ] Refactor partialize to only persist metadata.
-- [ ] Add in-memory cache for recently viewed canvases (optional).
-- [ ] Remove duplicate writes of nodes/edges to store where redundant.
-
-### Tier 3 (Viewport)
-
-- [ ] Add `NODE_TYPE_TO_FRONTEND` usage in `loadNodesInViewport`.
-- [ ] Implement `viewportToBbox` helper.
-- [ ] Add `onViewportChange` with debouncing.
-- [ ] Implement viewport-load flow for large canvases (nodeCount > threshold).
-- [ ] Decide edge strategy (A, B, or C) and implement.
-- [ ] Add merge/unload logic for viewport nodes.
-- [ ] Test with large canvas (100+ nodes).
+### Tier 3 (Viewport Loading)
+- [ ] Fix `loadNodesInViewport` to use `backendNodeToReactFlow`
+- [ ] Add `viewportToBbox` helper to `canvasApi.ts`
+- [ ] Add `onViewportChange` with debouncing in `page.tsx`
+- [ ] Implement viewport-load flow for canvases with nodeCount > 100
+- [ ] Choose edge strategy (A or B) and implement
+- [ ] Add `mergeNodes` and optional unload logic
+- [ ] Test with large canvas (100+ nodes)
 
 ---
 
@@ -239,21 +241,22 @@ const onViewportChange = useCallback(({ x, y, zoom }) => {
 | File | Changes |
 |------|---------|
 | `store/useCanvasStore.ts` | partialize: exclude nodes/edges for backend projects |
-| `hooks/useCanvasApi.ts` | Fix loadNodesInViewport type mapping |
-| `lib/canvasApi.ts` | Add viewportToBbox (optional) |
-| `draw/page.tsx` | onViewportChange, viewport-load branch |
-| `hooks/useCanvasLoader.ts` | Optional: metadata-only load path |
+| `hooks/useCanvasApi.ts` | Fix loadNodesInViewport type mapping with `backendNodeToReactFlow` |
+| `lib/canvasApi.ts` | Add viewportToBbox helper; export NODE_TYPE_TO_FRONTEND if needed |
+| `draw/page.tsx` | Add onViewportChange, viewport-load branch, mergeNodes |
+| `hooks/useCanvasLoader.ts` | Optional: metadata-only load path for large canvases |
 
 ---
 
 ## 8. Expected Results
 
-| Metric | Before | After Tier 1 | After Tier 2 | After Tier 3 |
-|--------|--------|--------------|--------------|--------------|
-| localStorage size | Full canvas | Metadata only (backend) | Metadata only | Metadata only |
-| Initial load (large canvas) | Full fetch | Full fetch | Full fetch | Viewport fetch |
-| Memory (1000 nodes) | ~2x (React + Zustand) | ~2x | ~1x + metadata | ~viewport-only |
-| API calls on pan/zoom | 0 | 0 | 0 | Debounced viewport |
+| Metric | Before | After Tier 1 | After Tier 3 |
+|--------|--------|--------------|--------------|
+| **localStorage size** | Full canvas (can hit 5–10MB) | Metadata only (~KB) | Metadata only |
+| **Initial load (1000 nodes)** | Full fetch (~1–2s) | Full fetch | Viewport fetch (~50–200 nodes, <500ms) |
+| **Memory (1000 nodes)** | ~2x (React + Zustand duplication) | ~2x | Viewport-only (~100–300 nodes) |
+| **API calls on pan/zoom** | 0 | 0 | Debounced viewport fetch (200ms) |
+| **Rehydration speed** | Slow (parse large JSON) | Fast (metadata only) | Fast |
 
 ---
 
@@ -261,3 +264,4 @@ const onViewportChange = useCallback(({ x, y, zoom }) => {
 
 - **FRONTEND_CANVAS_LOGIC.md** — Current flow and viewport API status
 - **CANVAS_SYNC_LOGIC.md** — Save logic and debouncing
+- **BACKEND_CANVAS_LOGIC.md** — Node types, storage, parent-child
