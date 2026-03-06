@@ -73,9 +73,22 @@ Follow this layout for all non-trivial queries:
         }
         this.logger.log(`Generating content with model: ${modelName} and type: ${data.type}`);
         try {
+            // Build contents for multi-turn: history + current user message
+            const historyContents = (data.history ?? [])
+                .filter((m) => m.role && m.text?.trim())
+                .map((m) => ({
+                    role: m.role as 'user' | 'model',
+                    parts: [{ text: m.text.trim() }],
+                }));
+
+            const contents = [
+                ...historyContents,
+                { role: 'user' as const, parts: [{ text: promptText }] },
+            ];
+
             const response = await this.genAI.models.generateContent({
                 model: modelName,
-                contents: [{ role: 'user', parts: [{ text: promptText }] }],
+                contents,
                 config: {
                     systemInstruction: this.aiInstruction,
                 },

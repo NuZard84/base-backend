@@ -23,6 +23,18 @@ export class GeminiController {
                         prompt: { type: 'string', example: 'Context about the request' },
                         ask: { type: 'string', example: 'What is a bit?' },
                         type: { type: 'string', example: 'summarize' },
+                        history: {
+                            type: 'array',
+                            description: 'Optional conversation history for multi-turn context',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    role: { type: 'string', enum: ['user', 'model'] },
+                                    text: { type: 'string' },
+                                },
+                                required: ['role', 'text'],
+                            },
+                        },
                     },
                     required: ['ask'],
                 },
