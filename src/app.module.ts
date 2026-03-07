@@ -11,6 +11,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { GeminiModule } from './modules/ai-model-api/gemini/gemini.module';
 import { CanvasesModule } from './modules/canvases/canvases.module';
+import { PrePromptsModule } from './modules/pre-prompts/pre-prompts.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { CanvasesModule } from './modules/canvases/canvases.module';
     HealthModule,
     GeminiModule,
     CanvasesModule,
+    PrePromptsModule,
   ],
   controllers: [AppController],
   providers: [
