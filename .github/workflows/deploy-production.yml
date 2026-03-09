@@ -1,0 +1,64 @@
+# Deploy base-backend to GCP Cloud Run on push to main
+#
+# Uses Workload Identity Federation (no service account keys required).
+# Required GitHub secrets:
+#   - WIF_PROVIDER: Full workload identity provider path, e.g.
+#     projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+#   - GCP_SA_EMAIL: Service account email, e.g. github-actions@PROJECT_ID.iam.gserviceaccount.com
+#
+# See .github/docs/WORKLOAD_IDENTITY_SETUP.md for GCP setup instructions.
+
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+env:
+  GCP_PROJECT_ID: project-dfd217c3-6aac-4df9-ba6
+  REGION: us-central1
+  IMAGE: us-central1-docker.pkg.dev/project-dfd217c3-6aac-4df9-ba6/cardboard-ai-backend/base-backend:latest
+  SERVICE: base-backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push image
+        run: |
+          docker compose -f docker-compose.production.yml build
+          docker compose -f docker-compose.production.yml push
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image ${{ env.IMAGE }} \
+            --region ${{ env.REGION }} \
+            --platform managed
+
+      - name: Show service URL
+        run: |
+          gcloud run services describe ${{ env.SERVICE }} \
+            --region ${{ env.REGION }} \
+            --format="value(status.url)"
