@@ -1,0 +1,17 @@
+# Production: build and push to GCP Artifact Registry for Cloud Run
+# Usage:
+#   docker compose -f docker-compose.production.yml build
+#   docker compose -f docker-compose.production.yml push
+# Or run: ./scripts/deploy-production.sh
+
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+    # GCP Artifact Registry (us-central1, cardboard-ai-backend)
+    image: us-central1-docker.pkg.dev/project-dfd217c3-6aac-4df9-ba6/cardboard-ai-backend/base-backend:latest
