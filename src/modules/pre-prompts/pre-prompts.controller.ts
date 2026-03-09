@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { CreatePrePromptDto } from './dto/create-pre-prompt.dto';
+import { UpdatePrePromptDto } from './dto/update-pre-prompt.dto';
 import { PrePromptsService } from './pre-prompts.service';
 
 @ApiTags('Pre-Prompts')
@@ -24,5 +25,29 @@ export class PrePromptsController {
   @ApiResponse({ status: 200, description: 'Return all templates.' })
   findAll(@Req() req: { user: { userId: string } }) {
     return this.prePromptsService.findAll(req.user.userId);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Edit a pre-prompt template' })
+  @ApiResponse({ status: 200, description: 'The template has been successfully updated.' })
+  @ApiResponse({ status: 403, description: 'Forbidden: system templates cannot be edited or not owned by user.' })
+  @ApiResponse({ status: 404, description: 'Template not found.' })
+  update(
+    @Req() req: { user: { userId: string } },
+    @Param('id') id: string,
+    @Body() dto: UpdatePrePromptDto,
+  ) {
+    return this.prePromptsService.update(req.user.userId, id, dto);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Delete a pre-prompt template' })
+  @ApiResponse({ status: 200, description: 'The template has been successfully deleted.' })
+  @ApiResponse({ status: 403, description: 'Forbidden: system templates cannot be deleted or not owned by user.' })
+  @ApiResponse({ status: 404, description: 'Template not found.' })
+  remove(@Req() req: { user: { userId: string } }, @Param('id') id: string) {
+    return this.prePromptsService.remove(req.user.userId, id);
   }
 }

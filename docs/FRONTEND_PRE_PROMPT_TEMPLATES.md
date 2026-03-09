@@ -36,6 +36,8 @@ Pre-Prompt Templates are reusable instruction blocks that define how the AI shou
 |--------|----------|-------------|
 | GET | `/api/pre-prompts` | Fetch system + current user's templates |
 | POST | `/api/pre-prompts` | Create a new template |
+| PATCH | `/api/pre-prompts/:id` | Edit a user-owned template |
+| DELETE | `/api/pre-prompts/:id` | Delete a user-owned template |
 
 ### GET Response
 
@@ -63,6 +65,32 @@ Pre-Prompt Templates are reusable instruction blocks that define how the AI shou
 | `prompt` | string | Yes | Instruction text |
 | `type` | string | No | `"system"` \| `"user"` \| `"feature"` (default: `"system"`) |
 
+### PATCH Request (Edit)
+
+`PATCH /api/pre-prompts/:id`
+
+```json
+{
+  "name": "Updated Name",
+  "prompt": "Updated instruction text...",
+  "type": "user"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | No | Display name (max 255 chars) |
+| `prompt` | string | No | Instruction text |
+| `type` | string | No | `"system"` \| `"user"` \| `"feature"` |
+
+All fields are optional; only provided fields are updated. Returns the updated template. **System templates** (seeded, `userId` null) cannot be edited — returns 403.
+
+### DELETE Request
+
+`DELETE /api/pre-prompts/:id`
+
+Returns `{ "success": true }` on success. **System templates** cannot be deleted — returns 403.
+
 ---
 
 ## Implementation Steps
@@ -84,6 +112,12 @@ export interface CreatePrePromptDto {
   prompt: string;
   type?: 'system' | 'user' | 'feature';
 }
+
+export interface UpdatePrePromptDto {
+  name?: string;
+  prompt?: string;
+  type?: 'system' | 'user' | 'feature';
+}
 ```
 
 ### Step 2: Create API Client
@@ -92,7 +126,7 @@ Add `base/src/lib/prePromptsApi.ts`:
 
 ```ts
 import api from './api';
-import type { PrePromptTemplate, CreatePrePromptDto } from '@/types/prePrompts';
+import type { PrePromptTemplate, CreatePrePromptDto, UpdatePrePromptDto } from '@/types/prePrompts';
 
 export async function fetchPrePrompts(): Promise<PrePromptTemplate[]> {
   const { data } = await api.get<PrePromptTemplate[]>('/api/pre-prompts');
@@ -101,6 +135,16 @@ export async function fetchPrePrompts(): Promise<PrePromptTemplate[]> {
 
 export async function createPrePrompt(dto: CreatePrePromptDto): Promise<PrePromptTemplate> {
   const { data } = await api.post<PrePromptTemplate>('/api/pre-prompts', dto);
+  return data;
+}
+
+export async function updatePrePrompt(id: string, dto: UpdatePrePromptDto): Promise<PrePromptTemplate> {
+  const { data } = await api.patch<PrePromptTemplate>(`/api/pre-prompts/${id}`, dto);
+  return data;
+}
+
+export async function deletePrePrompt(id: string): Promise<{ success: boolean }> {
+  const { data } = await api.delete<{ success: boolean }>(`/api/pre-prompts/${id}`);
   return data;
 }
 ```
@@ -163,8 +207,8 @@ await CallGemini({ data: { ask: fullPrompt, ... }, config });
 
 | Task | File / Location |
 |------|-----------------|
-| Add `PrePromptTemplate` and `CreatePrePromptDto` types | `types/prePrompts.ts` |
-| Add `fetchPrePrompts` and `createPrePrompt` API functions | `lib/prePromptsApi.ts` |
+| Add `PrePromptTemplate`, `CreatePrePromptDto`, `UpdatePrePromptDto` types | `types/prePrompts.ts` |
+| Add `fetchPrePrompts`, `createPrePrompt`, `updatePrePrompt`, `deletePrePrompt` API functions | `lib/prePromptsApi.ts` |
 | Fetch templates on load | Template selector component |
 | Render template selector (dropdown, list, cards) | Same component |
 | Store selected template in state | Same component |

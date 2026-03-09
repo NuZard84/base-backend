@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { CreatePrePromptDto } from './dto/create-pre-prompt.dto';
+import { UpdatePrePromptDto } from './dto/update-pre-prompt.dto';
 import { PrePromptTemplateType } from '@prisma/client';
 
 @Injectable()
@@ -39,6 +40,49 @@ export class PrePromptsService {
       orderBy: { createdAt: 'asc' },
     });
     return templates.map((t) => this.toResponse(t));
+  }
+
+  async update(userId: string, id: string, dto: UpdatePrePromptDto) {
+    const template = await this.prisma.prePromptTemplate.findUnique({
+      where: { id },
+    });
+    if (!template) {
+      throw new NotFoundException('Template not found');
+    }
+    if (template.userId === null) {
+      throw new ForbiddenException('System templates cannot be edited');
+    }
+    if (template.userId !== userId) {
+      throw new ForbiddenException('You can only edit your own templates');
+    }
+    const updated = await this.prisma.prePromptTemplate.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.prompt !== undefined && { prompt: dto.prompt }),
+        ...(dto.type !== undefined && { type: this.mapTypeToEnum(dto.type) }),
+      },
+    });
+    return this.toResponse(updated);
+  }
+
+  async remove(userId: string, id: string) {
+    const template = await this.prisma.prePromptTemplate.findUnique({
+      where: { id },
+    });
+    if (!template) {
+      throw new NotFoundException('Template not found');
+    }
+    if (template.userId === null) {
+      throw new ForbiddenException('System templates cannot be deleted');
+    }
+    if (template.userId !== userId) {
+      throw new ForbiddenException('You can only delete your own templates');
+    }
+    await this.prisma.prePromptTemplate.delete({
+      where: { id },
+    });
+    return { success: true };
   }
 
   private toResponse(template: {
