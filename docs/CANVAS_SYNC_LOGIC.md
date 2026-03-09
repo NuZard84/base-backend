@@ -1,4 +1,4 @@
-# Canvas Sync Logic — Full System Documentation
+# Canvas Sync Logic = Full System Documentation
 
 End-to-end documentation of the canvas sync system: bounding box indexing, tile-based spatial queries, frontend debouncing, and when API calls occur.
 
