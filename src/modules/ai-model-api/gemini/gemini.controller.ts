@@ -1,11 +1,12 @@
-import { Controller, Post, Body, Logger, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, BadRequestException, Logger, UseGuards } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
-import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
 import { AiRequestData, AiRequestConfig } from '../types';
 
 @ApiTags('AI Gemini')
+@ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
 @Controller('ai/gemini')
 export class GeminiController {
@@ -43,6 +44,11 @@ export class GeminiController {
                     properties: {
                         model: { type: 'string', example: 'gemini-2.0-flash-lite' },
                         responseLength: { type: 'string', example: 'medium' },
+                        isSearch: {
+                            type: 'boolean',
+                            example: true,
+                            description: 'Enable Google Search Grounding for real-time internet data. Returns sources[] in the response.',
+                        },
                     },
                 },
             },
@@ -51,5 +57,25 @@ export class GeminiController {
     async generate(@Body() body: { data: AiRequestData; config?: AiRequestConfig }) {
 
         return this.geminiService.generateContent(body.data, body.config);
+    }
+
+    @Get('search')
+    @ApiOperation({
+        summary: 'Real-time search via Gemini (Google Search Grounding)',
+        description:
+            'Sends a search prompt to Gemini with Google Search Grounding enabled. ' +
+            'Returns an AI-generated answer with cited source URLs from the live web.',
+    })
+    @ApiQuery({
+        name: 'q',
+        required: true,
+        description: 'The search prompt / question to answer with real-time data.',
+        example: 'What is the current price of Bitcoin?',
+    })
+    async search(@Query('q') q: string) {
+        if (!q?.trim()) {
+            throw new BadRequestException('Query parameter "q" must not be empty.');
+        }
+        return this.geminiService.getRealTimeData(q.trim());
     }
 }

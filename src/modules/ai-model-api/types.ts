@@ -21,9 +21,13 @@ export class AiRequestData {
 export class AiRequestConfig {
     model?: string;
     responseLength?: string;
+    /** When true, enables Google Search Grounding for real-time internet data */
+    isSearch?: boolean;
 }
 
 export class AiResponse {
     success: boolean;
     text: string;
+    /** Populated only when isSearch is true — grounded web sources */
+    sources?: { title: string; url: string }[];
 }

@@ -1,7 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
 import { AiRequestData, AiRequestConfig, AiResponse, queryType } from '../types';
+
+export interface GroundingSource {
+    title: string;
+    url: string;
+}
+
+export interface RealTimeDataResponse {
+    answer: string;
+    sources: GroundingSource[];
+}
 
 @Injectable()
 export class GeminiService {
@@ -71,7 +81,7 @@ Follow this layout for all non-trivial queries:
                 modelName = config?.model || 'gemini-2.0-flash-lite'
                 break
         }
-        this.logger.log(`Generating content with model: ${modelName} and type: ${data.type}`);
+        this.logger.log(`Generating content with model: ${modelName}, type: ${data.type}, isSearch: ${!!config?.isSearch}`);
         try {
             // Build contents for multi-turn: history + current user message
             const historyContents = (data.history ?? [])
@@ -86,11 +96,19 @@ Follow this layout for all non-trivial queries:
                 { role: 'user' as const, parts: [{ text: promptText }] },
             ];
 
+         
+            // Fall back to gemini-3.1-pro-preview only if no model was specified.
+            const isSearch = !!config?.isSearch;
+            if (isSearch && !config?.model) {
+                modelName = 'gemini-3.1-pro-preview';
+            }
+
             const response = await this.genAI.models.generateContent({
                 model: modelName,
                 contents,
                 config: {
-                    systemInstruction: this.aiInstruction,
+                    systemInstruction: isSearch ? undefined : this.aiInstruction,
+                    ...(isSearch ? { tools: [{ googleSearch: {} }] } : {}),
                 },
             });
 
@@ -102,13 +120,74 @@ Follow this layout for all non-trivial queries:
                 };
             }
 
+            // Extract grounding sources when isSearch was used
+            const sources = isSearch
+                ? (response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [])
+                    .filter((chunk) => chunk?.web?.uri)
+                    .map((chunk) => ({
+                        title: chunk.web?.title ?? 'Untitled',
+                        url: chunk.web?.uri ?? '',
+                    }))
+                : undefined;
+
+            this.logger.log(isSearch ? `[isSearch] Got ${sources?.length ?? 0} grounding source(s).` : '');
+
             return {
                 success: true,
                 text: response.text,
+                ...(sources !== undefined ? { sources } : {}),
             };
         } catch (error) {
             this.logger.error(`Error generating content: ${error.message}`, error.stack);
             throw error;
+        }
+    }
+
+    /**
+     * Fetches real-time data from the internet using Gemini's Google Search Grounding.
+     * @param prompt - The search prompt / question to answer with live data.
+     */
+    async getRealTimeData(prompt: string): Promise<RealTimeDataResponse> {
+        if (!this.genAI) {
+            this.logger.error('Gemini AI not initialized - missing API key');
+            throw new InternalServerErrorException('AI Service is not configured. Please set GEMINI_API_KEY.');
+        }
+
+        this.logger.log(`[getRealTimeData] prompt: "${prompt}"`);
+
+        try {
+            const response = await this.genAI.models.generateContent({
+                model: 'gemini-3.1-pro-preview',
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config: {
+                    tools: [{ googleSearch: {} }],
+                },
+            });
+
+            const answer = response.text ?? '';
+
+            // Safely extract grounding chunks from the first candidate
+            const chunks =
+                response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+
+            const sources: GroundingSource[] = chunks
+                .filter((chunk) => chunk?.web?.uri)
+                .map((chunk) => ({
+                    title: chunk.web?.title ?? 'Untitled',
+                    url: chunk.web?.uri ?? '',
+                }));
+
+            this.logger.log(`[getRealTimeData] Got ${sources.length} grounding source(s).`);
+
+            return { answer, sources };
+        } catch (error) {
+            this.logger.error(
+                `[getRealTimeData] Error: ${error?.message}`,
+                error?.stack,
+            );
+            throw new InternalServerErrorException(
+                'Failed to fetch real-time data from Gemini. Please try again.',
+            );
         }
     }
 }
