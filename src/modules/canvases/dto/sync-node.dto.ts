@@ -66,18 +66,57 @@ export class SyncEdgeItemDto {
     metadata?: Record<string, unknown>;
 }
 
+/**
+ * Sync DTO supports two modes:
+ * - FULL SYNC: nodes + edges present → full replace (fallback for initial load, recovery)
+ * - DELTA SYNC: nodesUpdated | nodesDeleted | edgesAdded | edgesDeleted → touch only changed rows
+ */
 export class SyncCanvasDto {
-    @ApiProperty({ type: [SyncNodeItemDto], description: 'Nodes to sync (upsert by id)' })
+    /** Full canvas nodes (required for full sync) */
+    @ApiPropertyOptional({ type: [SyncNodeItemDto], description: 'Full nodes list (full sync only)' })
+    @IsOptional()
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => SyncNodeItemDto)
-    nodes: SyncNodeItemDto[];
+    nodes?: SyncNodeItemDto[];
 
-    @ApiProperty({ type: [SyncEdgeItemDto], description: 'Edges to sync' })
+    /** Full canvas edges (required for full sync) */
+    @ApiPropertyOptional({ type: [SyncEdgeItemDto], description: 'Full edges list (full sync only)' })
+    @IsOptional()
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => SyncEdgeItemDto)
-    edges: SyncEdgeItemDto[];
+    edges?: SyncEdgeItemDto[];
+
+    /** Nodes created or modified (delta sync) */
+    @ApiPropertyOptional({ type: [SyncNodeItemDto], description: 'Nodes to upsert (delta sync)' })
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => SyncNodeItemDto)
+    nodesUpdated?: SyncNodeItemDto[];
+
+    /** Node clientIds to delete (delta sync) */
+    @ApiPropertyOptional({ description: 'Node clientIds to remove (delta sync)' })
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    nodesDeleted?: string[];
+
+    /** New edges to add (delta sync) */
+    @ApiPropertyOptional({ type: [SyncEdgeItemDto], description: 'Edges to add (delta sync)' })
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => SyncEdgeItemDto)
+    edgesAdded?: SyncEdgeItemDto[];
+
+    /** Edge UUIDs to delete (delta sync) */
+    @ApiPropertyOptional({ description: 'Edge IDs to remove (delta sync)' })
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    edgesDeleted?: string[];
 
     @ApiPropertyOptional()
     @IsOptional()

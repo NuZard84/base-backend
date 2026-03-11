@@ -1,10 +1,20 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+    BadRequestException,
+    Injectable,
+    Logger,
+    NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { CreateCanvasDto } from './dto/create-canvas.dto';
 import { RenameCanvasDto } from './dto/rename-canvas.dto';
-import { SyncCanvasDto } from './dto/sync-node.dto';
+import {
+    SyncCanvasDto,
+    SyncEdgeItemDto,
+    SyncNodeItemDto,
+} from './dto/sync-node.dto';
 import { ViewportQueryDto } from './dto/viewport-query.dto';
 import { NodeRole, NodeType } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 
 /** Tile size for spatial indexing (Figma-style grid) */
 const TILE_SIZE = 512;
@@ -35,6 +45,57 @@ function computeTileIds(minX: number, minY: number, maxX: number, maxY: number):
         }
     }
     return ids;
+}
+
+/** Map frontend node type to Prisma enum */
+function mapNodeType(type?: string): NodeType {
+    return type ? NODE_TYPE_MAP[type] ?? NODE_TYPE_MAP.default : NodeType.TEXT;
+}
+
+/** Prepare node data for create/update (shared by full and delta sync). Uses canvasId for batch ops. */
+function prepareNodeData(
+    node: SyncNodeItemDto,
+    canvasId: string,
+): Prisma.NodeUncheckedCreateInput {
+    const w = node.width ?? 360;
+    const h = node.height ?? 240;
+    const bboxMinX = node.x;
+    const bboxMinY = node.y;
+    const bboxMaxX = node.x + w;
+    const bboxMaxY = node.y + h;
+    const tileIdsArr = computeTileIds(bboxMinX, bboxMinY, bboxMaxX, bboxMaxY);
+    const nodeType = mapNodeType(node.type);
+
+    return {
+        canvasId,
+        clientId: node.id,
+        x: node.x,
+        y: node.y,
+        width: w,
+        height: h,
+        zIndex: node.zIndex ?? 0,
+        nodeType,
+        role: NodeRole.INPUT,
+        content: (node.data ?? {}) as object,
+        bboxMinX,
+        bboxMinY,
+        bboxMaxX,
+        bboxMaxY,
+        tileIds: tileIdsArr,
+    };
+}
+
+function hasDeltaPayload(dto: SyncCanvasDto): boolean {
+    return (
+        (dto.nodesUpdated?.length ?? 0) > 0 ||
+        (dto.nodesDeleted?.length ?? 0) > 0 ||
+        (dto.edgesAdded?.length ?? 0) > 0 ||
+        (dto.edgesDeleted?.length ?? 0) > 0
+    );
+}
+
+function isFullSync(dto: SyncCanvasDto): boolean {
+    return dto.nodes !== undefined && dto.edges !== undefined;
 }
 
 @Injectable()
@@ -198,22 +259,40 @@ export class CanvasesService {
     }
 
     /**
-     * Bulk sync nodes and edges. Atomic transaction.
-     * - Full replace: removes nodes/edges not in payload
-     * - Computes bbox + tileIds for spatial optimization
+     * Sync nodes and edges. Supports two modes:
+     * - FULL SYNC: nodes + edges present → full replace (fallback for initial load, recovery)
+     * - DELTA SYNC: nodesUpdated | nodesDeleted | edgesAdded | edgesDeleted → touch only changed rows
      */
     async sync(userId: string, canvasId: string, dto: SyncCanvasDto) {
         await this.ensureCanvasOwnership(userId, canvasId);
 
+        if (isFullSync(dto)) {
+            return this.runFullSync(userId, canvasId, dto);
+        }
+        if (hasDeltaPayload(dto)) {
+            return this.runDeltaSync(userId, canvasId, dto);
+        }
+
+        throw new BadRequestException(
+            'Either nodes+edges (full sync) or nodesUpdated/nodesDeleted/edgesAdded/edgesDeleted (delta sync) required',
+        );
+    }
+
+    /**
+     * Full sync: full replace. Atomic transaction. Used for initial load, recovery, import.
+     */
+    private async runFullSync(userId: string, canvasId: string, dto: SyncCanvasDto) {
         const { nodes, edges, viewportX, viewportY, viewportZoom } = dto;
+        const nodesArr = nodes ?? [];
+        const edgesArr = edges ?? [];
 
         this.logger.log(
-            `[Sync] Triggered | canvasId=${canvasId} | userId=${userId} | ` +
-                `nodes=${nodes.length} | edges=${edges.length} | ` +
+            `[Sync] FULL | canvasId=${canvasId} | userId=${userId} | ` +
+                `nodes=${nodesArr.length} | edges=${edgesArr.length} | ` +
                 `viewport=[x:${viewportX ?? 'n/a'}, y:${viewportY ?? 'n/a'}, zoom:${viewportZoom ?? 'n/a'}]`,
         );
-        if (nodes.length > 0) {
-            const sample = nodes.slice(0, 2).map(
+        if (nodesArr.length > 0) {
+            const sample = nodesArr.slice(0, 2).map(
                 (n) => `{id:${n.id}, x:${n.x}, y:${n.y}, type:${n.type ?? '?'}}`,
             );
             this.logger.debug(`[Sync] Node samples: ${sample.join(', ')}`);
@@ -225,7 +304,7 @@ export class CanvasesService {
                 select: { id: true, clientId: true },
             });
 
-            const payloadClientIds = new Set(nodes.map((n) => n.id));
+            const payloadClientIds = new Set(nodesArr.map((n) => n.id));
             const toDeleteIds = existingNodes
                 .filter((n) => n.clientId && !payloadClientIds.has(n.clientId))
                 .map((n) => n.id);
@@ -252,41 +331,20 @@ export class CanvasesService {
             let boundsMaxX = -Infinity;
             let boundsMaxY = -Infinity;
 
-            for (const node of nodes) {
-                const w = node.width ?? 360;
-                const h = node.height ?? 240;
-                const bboxMinX = node.x;
-                const bboxMinY = node.y;
-                const bboxMaxX = node.x + w;
-                const bboxMaxY = node.y + h;
-                const tileIdsArr = computeTileIds(bboxMinX, bboxMinY, bboxMaxX, bboxMaxY);
-                const nodeType = node.type ? NODE_TYPE_MAP[node.type] ?? NODE_TYPE_MAP.default : NodeType.TEXT;
-
-                const nodeData = {
-                    canvasId,
-                    clientId: node.id,
-                    x: node.x,
-                    y: node.y,
-                    width: w,
-                    height: h,
-                    zIndex: node.zIndex ?? 0,
-                    nodeType,
-                    role: NodeRole.INPUT,
-                    content: (node.data ?? {}) as object,
-                    bboxMinX,
-                    bboxMinY,
-                    bboxMaxX,
-                    bboxMaxY,
-                    tileIds: tileIdsArr,
-                };
+            for (const node of nodesArr) {
+                const nodeData = prepareNodeData(node, canvasId);
 
                 const upserted = await tx.node.upsert({
                     where: { canvasId_clientId: { canvasId, clientId: node.id } },
                     create: nodeData,
-                    update: nodeData,
+                    update: nodeData as Prisma.NodeUncheckedUpdateInput,
                 });
                 clientIdToNodeId.set(node.id, upserted.id);
 
+                const bboxMinX = nodeData.bboxMinX as number;
+                const bboxMinY = nodeData.bboxMinY as number;
+                const bboxMaxX = nodeData.bboxMaxX as number;
+                const bboxMaxY = nodeData.bboxMaxY as number;
                 boundsMinX = Math.min(boundsMinX, bboxMinX);
                 boundsMinY = Math.min(boundsMinY, bboxMinY);
                 boundsMaxX = Math.max(boundsMaxX, bboxMaxX);
@@ -295,7 +353,7 @@ export class CanvasesService {
 
             await tx.edge.deleteMany({ where: { canvasId } });
 
-            const validEdges = edges.filter(
+            const validEdges = edgesArr.filter(
                 (e) => clientIdToNodeId.has(e.source) && clientIdToNodeId.has(e.target),
             );
 
@@ -311,7 +369,7 @@ export class CanvasesService {
                 });
             }
 
-            const nodeCount = nodes.length;
+            const nodeCount = nodesArr.length;
             const edgeCount = validEdges.length;
 
             const updateData: Record<string, unknown> = {
@@ -321,7 +379,7 @@ export class CanvasesService {
                 viewportY: viewportY ?? undefined,
                 viewportZoom: viewportZoom ?? undefined,
             };
-            if (nodes.length > 0 && Number.isFinite(boundsMinX)) {
+            if (nodesArr.length > 0 && Number.isFinite(boundsMinX)) {
                 updateData.boundsMinX = boundsMinX;
                 updateData.boundsMinY = boundsMinY;
                 updateData.boundsMaxX = boundsMaxX;
@@ -342,7 +400,7 @@ export class CanvasesService {
             });
 
             this.logger.log(
-                `[Sync] Completed | canvasId=${canvasId} | nodesSaved=${nodeCount} | edgesSaved=${edgeCount}`,
+                `[Sync] FULL Completed | canvasId=${canvasId} | nodesSaved=${nodeCount} | edgesSaved=${edgeCount}`,
             );
 
             return {
@@ -356,6 +414,133 @@ export class CanvasesService {
                 })),
             };
         }, { timeout: 30000 });
+    }
+
+    /**
+     * Delta sync: touch only changed rows. Short transaction, few queries.
+     */
+    private async runDeltaSync(userId: string, canvasId: string, dto: SyncCanvasDto) {
+        const { nodesUpdated, nodesDeleted, edgesAdded, edgesDeleted, viewportX, viewportY, viewportZoom } = dto;
+        const nodesArr = nodesUpdated ?? [];
+        const nodesDel = nodesDeleted ?? [];
+        const edgesAdd = edgesAdded ?? [];
+        const edgesDel = edgesDeleted ?? [];
+
+        this.logger.log(
+            `[Sync] DELTA | canvasId=${canvasId} | userId=${userId} | ` +
+                `nodesUpdated=${nodesArr.length} | nodesDeleted=${nodesDel.length} | ` +
+                `edgesAdded=${edgesAdd.length} | edgesDeleted=${edgesDel.length}`,
+        );
+
+        return this.prisma.$transaction(async (tx) => {
+            const canvas = await tx.canvas.findUnique({
+                where: { id: canvasId },
+                select: { nodeCount: true, edgeCount: true },
+            });
+            if (!canvas) {
+                throw new NotFoundException(`Canvas not found`);
+            }
+
+            let nodesCreated = 0;
+            let nodesDeletedCount = 0;
+
+            // --- 1. Node deletions ---
+            if (nodesDel.length > 0) {
+                const nodesToDelete = await tx.node.findMany({
+                    where: { canvasId, clientId: { in: nodesDel } },
+                    select: { id: true },
+                });
+                const ids = nodesToDelete.map((n) => n.id);
+
+                if (ids.length > 0) {
+                    await tx.edge.deleteMany({
+                        where: {
+                            canvasId,
+                            OR: [
+                                { sourceNodeId: { in: ids } },
+                                { targetNodeId: { in: ids } },
+                            ],
+                        },
+                    });
+                    await tx.node.deleteMany({ where: { id: { in: ids } } });
+                    nodesDeletedCount = ids.length;
+                }
+            }
+
+            // --- 2. Upsert all nodesUpdated (idempotent - handles concurrent syncs) ---
+            const clientIdToNodeId = new Map<string, string>();
+            for (const node of nodesArr) {
+                const nodeData = prepareNodeData(node, canvasId);
+                const upserted = await tx.node.upsert({
+                    where: { canvasId_clientId: { canvasId, clientId: node.id } },
+                    create: nodeData,
+                    update: nodeData as Prisma.NodeUncheckedUpdateInput,
+                });
+                if (upserted.clientId) clientIdToNodeId.set(upserted.clientId, upserted.id);
+            }
+
+            // --- 5. Edge deletions ---
+            if (edgesDel.length > 0) {
+                await tx.edge.deleteMany({
+                    where: { id: { in: edgesDel }, canvasId },
+                });
+            }
+
+            // --- 6. Edge additions ---
+            if (edgesAdd.length > 0) {
+                const validEdges = edgesAdd.filter(
+                    (e) => clientIdToNodeId.has(e.source) && clientIdToNodeId.has(e.target),
+                );
+                if (validEdges.length > 0) {
+                    await tx.edge.createMany({
+                        data: validEdges.map((e) => ({
+                            canvasId,
+                            sourceNodeId: clientIdToNodeId.get(e.source)!,
+                            targetNodeId: clientIdToNodeId.get(e.target)!,
+                            metadata: (e.metadata ?? {}) as object,
+                        })),
+                        skipDuplicates: true,
+                    });
+                }
+            }
+
+            // --- 7. Viewport update ---
+            const viewportData: Record<string, unknown> = {};
+            if (viewportX !== undefined) viewportData.viewportX = viewportX;
+            if (viewportY !== undefined) viewportData.viewportY = viewportY;
+            if (viewportZoom !== undefined) viewportData.viewportZoom = viewportZoom;
+
+            // --- 8. Canvas counts (use actual DB counts for accuracy) ---
+            const nodeCount = await tx.node.count({ where: { canvasId } });
+            const edgeCount = await tx.edge.count({ where: { canvasId } });
+
+            await tx.canvas.update({
+                where: { id: canvasId },
+                data: {
+                    ...viewportData,
+                    nodeCount: Math.max(0, nodeCount),
+                    edgeCount,
+                },
+            });
+
+            this.logger.log(
+                `[Sync] DELTA Completed | canvasId=${canvasId} | nodesUpserted=${nodesArr.length} | nodesDeleted=${nodesDeletedCount} | nodeCount=${nodeCount} | edgeCount=${edgeCount}`,
+            );
+
+            return {
+                nodeIdMap: Object.fromEntries(clientIdToNodeId),
+                updatedNodes: nodesArr.map((n) => n.id),
+                deletedNodes: nodesDel,
+                viewport:
+                    viewportData.viewportX !== undefined ||
+                    viewportData.viewportY !== undefined ||
+                    viewportData.viewportZoom !== undefined
+                        ? { viewportX, viewportY, viewportZoom }
+                        : undefined,
+                nodeCount: Math.max(0, nodeCount),
+                edgeCount,
+            };
+        }, { timeout: 10000 });
     }
 
     async rename(userId: string, id: string, renameDto: RenameCanvasDto) {
