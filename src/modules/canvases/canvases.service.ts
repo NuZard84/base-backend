@@ -331,24 +331,30 @@ export class CanvasesService {
             let boundsMaxX = -Infinity;
             let boundsMaxY = -Infinity;
 
-            for (const node of nodesArr) {
-                const nodeData = prepareNodeData(node, canvasId);
-
-                const upserted = await tx.node.upsert({
-                    where: { canvasId_clientId: { canvasId, clientId: node.id } },
-                    create: nodeData,
-                    update: nodeData as Prisma.NodeUncheckedUpdateInput,
-                });
-                clientIdToNodeId.set(node.id, upserted.id);
-
-                const bboxMinX = nodeData.bboxMinX as number;
-                const bboxMinY = nodeData.bboxMinY as number;
-                const bboxMaxX = nodeData.bboxMaxX as number;
-                const bboxMaxY = nodeData.bboxMaxY as number;
-                boundsMinX = Math.min(boundsMinX, bboxMinX);
-                boundsMinY = Math.min(boundsMinY, bboxMinY);
-                boundsMaxX = Math.max(boundsMaxX, bboxMaxX);
-                boundsMaxY = Math.max(boundsMaxY, bboxMaxY);
+            // Parallel node upserts (reduces latency from N round-trips to ~1)
+            if (nodesArr.length > 0) {
+                const upsertResults = await Promise.all(
+                    nodesArr.map(async (node) => {
+                        const nodeData = prepareNodeData(node, canvasId);
+                        const upserted = await tx.node.upsert({
+                            where: { canvasId_clientId: { canvasId, clientId: node.id } },
+                            create: nodeData,
+                            update: nodeData as Prisma.NodeUncheckedUpdateInput,
+                        });
+                        return { nodeData, clientId: node.id, nodeId: upserted.id };
+                    }),
+                );
+                for (const { nodeData, clientId, nodeId } of upsertResults) {
+                    clientIdToNodeId.set(clientId, nodeId);
+                    const bboxMinX = nodeData.bboxMinX as number;
+                    const bboxMinY = nodeData.bboxMinY as number;
+                    const bboxMaxX = nodeData.bboxMaxX as number;
+                    const bboxMaxY = nodeData.bboxMaxY as number;
+                    boundsMinX = Math.min(boundsMinX, bboxMinX);
+                    boundsMinY = Math.min(boundsMinY, bboxMinY);
+                    boundsMaxX = Math.max(boundsMaxX, bboxMaxX);
+                    boundsMaxY = Math.max(boundsMaxY, bboxMaxY);
+                }
             }
 
             await tx.edge.deleteMany({ where: { canvasId } });
@@ -413,7 +419,7 @@ export class CanvasesService {
                     target: e.targetNode.clientId,
                 })),
             };
-        }, { timeout: 30000 });
+        }, { timeout: 25000 });
     }
 
     /**
@@ -467,19 +473,24 @@ export class CanvasesService {
                 }
             }
 
-            // --- 2. Upsert all nodesUpdated (idempotent - handles concurrent syncs) ---
+            // --- 2. Upsert all nodesUpdated in parallel (reduces latency from N round-trips to ~1) ---
             const clientIdToNodeId = new Map<string, string>();
-            for (const node of nodesArr) {
-                const nodeData = prepareNodeData(node, canvasId);
-                const upserted = await tx.node.upsert({
-                    where: { canvasId_clientId: { canvasId, clientId: node.id } },
-                    create: nodeData,
-                    update: nodeData as Prisma.NodeUncheckedUpdateInput,
-                });
-                if (upserted.clientId) clientIdToNodeId.set(upserted.clientId, upserted.id);
+            if (nodesArr.length > 0) {
+                const upsertResults = await Promise.all(
+                    nodesArr.map(async (node) => {
+                        const nodeData = prepareNodeData(node, canvasId);
+                        const upserted = await tx.node.upsert({
+                            where: { canvasId_clientId: { canvasId, clientId: node.id } },
+                            create: nodeData,
+                            update: nodeData as Prisma.NodeUncheckedUpdateInput,
+                        });
+                        return [node.id, upserted.id] as const;
+                    }),
+                );
+                upsertResults.forEach(([clientId, nodeId]) => clientIdToNodeId.set(clientId, nodeId));
             }
 
-            // --- 5. Edge deletions ---
+            // --- 3. Edge deletions ---
             if (edgesDel.length > 0) {
                 await tx.edge.deleteMany({
                     where: { id: { in: edgesDel }, canvasId },
@@ -510,9 +521,11 @@ export class CanvasesService {
             if (viewportY !== undefined) viewportData.viewportY = viewportY;
             if (viewportZoom !== undefined) viewportData.viewportZoom = viewportZoom;
 
-            // --- 8. Canvas counts (use actual DB counts for accuracy) ---
-            const nodeCount = await tx.node.count({ where: { canvasId } });
-            const edgeCount = await tx.edge.count({ where: { canvasId } });
+            // --- 8. Canvas counts (run in parallel to save a round-trip) ---
+            const [nodeCount, edgeCount] = await Promise.all([
+                tx.node.count({ where: { canvasId } }),
+                tx.edge.count({ where: { canvasId } }),
+            ]);
 
             await tx.canvas.update({
                 where: { id: canvasId },
@@ -540,7 +553,7 @@ export class CanvasesService {
                 nodeCount: Math.max(0, nodeCount),
                 edgeCount,
             };
-        }, { timeout: 10000 });
+        }, { timeout: 25000 });
     }
 
     async rename(userId: string, id: string, renameDto: RenameCanvasDto) {
