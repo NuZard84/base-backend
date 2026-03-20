@@ -13,77 +13,11 @@ import {
     SyncNodeItemDto,
 } from './dto/sync-node.dto';
 import { ViewportQueryDto } from './dto/viewport-query.dto';
-import { NodeRole, NodeType } from '@prisma/client';
+import { CanvasRole } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
-
-/** Tile size for spatial indexing (Figma-style grid) */
-const TILE_SIZE = 512;
-
-/** Map frontend node type to Prisma NodeType enum.
- * LoadingNode → RESPONSE: by sync time the node always has a response or error, never still loading. */
-const NODE_TYPE_MAP: Record<string, NodeType> = {
-    QuestionNode: NodeType.QUESTION,
-    ResponseNode: NodeType.RESPONSE,
-    LoadingNode: NodeType.RESPONSE, // Frontend uses LoadingNode; we persist as RESPONSE
-    ImageNode: NodeType.IMAGE,
-    CommentNode: NodeType.COMMENT,
-    NotesNode: NodeType.NOTES,
-    YoutubeNode: NodeType.EMBED,
-    default: NodeType.TEXT,
-};
-
-/** Compute tile IDs for a bounding box (Figma-style tiling) */
-function computeTileIds(minX: number, minY: number, maxX: number, maxY: number): number[] {
-    const tileXMin = Math.floor(minX / TILE_SIZE);
-    const tileYMin = Math.floor(minY / TILE_SIZE);
-    const tileXMax = Math.floor(maxX / TILE_SIZE);
-    const tileYMax = Math.floor(maxY / TILE_SIZE);
-    const ids: number[] = [];
-    for (let ty = tileYMin; ty <= tileYMax; ty++) {
-        for (let tx = tileXMin; tx <= tileXMax; tx++) {
-            ids.push(ty * 10000 + tx);
-        }
-    }
-    return ids;
-}
-
-/** Map frontend node type to Prisma enum */
-function mapNodeType(type?: string): NodeType {
-    return type ? NODE_TYPE_MAP[type] ?? NODE_TYPE_MAP.default : NodeType.TEXT;
-}
-
-/** Prepare node data for create/update (shared by full and delta sync). Uses canvasId for batch ops. */
-function prepareNodeData(
-    node: SyncNodeItemDto,
-    canvasId: string,
-): Prisma.NodeUncheckedCreateInput {
-    const w = node.width ?? 360;
-    const h = node.height ?? 240;
-    const bboxMinX = node.x;
-    const bboxMinY = node.y;
-    const bboxMaxX = node.x + w;
-    const bboxMaxY = node.y + h;
-    const tileIdsArr = computeTileIds(bboxMinX, bboxMinY, bboxMaxX, bboxMaxY);
-    const nodeType = mapNodeType(node.type);
-
-    return {
-        canvasId,
-        clientId: node.id,
-        x: node.x,
-        y: node.y,
-        width: w,
-        height: h,
-        zIndex: node.zIndex ?? 0,
-        nodeType,
-        role: NodeRole.INPUT,
-        content: (node.data ?? {}) as object,
-        bboxMinX,
-        bboxMinY,
-        bboxMaxX,
-        bboxMaxY,
-        tileIds: tileIdsArr,
-    };
-}
+import { CanvasSharesService } from './canvas-shares/canvas-shares.service';
+import { CanvasesGateway } from './canvases.gateway';
+import { prepareNodeData } from './canvas-utils';
 
 function hasDeltaPayload(dto: SyncCanvasDto): boolean {
     return (
@@ -102,7 +36,11 @@ function isFullSync(dto: SyncCanvasDto): boolean {
 export class CanvasesService {
     private readonly logger = new Logger(CanvasesService.name);
 
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        private canvasSharesService: CanvasSharesService,
+        private canvasesGateway: CanvasesGateway,
+    ) {}
 
     private generateRandomString(length: number): string {
         const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -139,7 +77,12 @@ export class CanvasesService {
 
     async findAll(userId: string) {
         return this.prisma.canvas.findMany({
-            where: { userId },
+            where: { 
+                OR: [
+                    { userId },
+                    { shares: { some: { userId, status: 'ACTIVE' } } }
+                ]
+            },
             select: {
                 id: true,
                 name: true,
@@ -160,8 +103,10 @@ export class CanvasesService {
     }
 
     async findOne(userId: string, id: string) {
-        const canvas = await this.prisma.canvas.findFirst({
-            where: { id, userId },
+        await this.canvasSharesService.ensureCanvasAccess(userId, id, CanvasRole.VIEWER);
+
+        const canvas = await this.prisma.canvas.findUnique({
+            where: { id },
             include: {
                 nodes: {
                     orderBy: [{ zIndex: 'asc' }, { createdAt: 'asc' }],
@@ -182,7 +127,7 @@ export class CanvasesService {
      * Uses bbox overlap: bboxMinX < maxX AND bboxMaxX > minX AND bboxMinY < maxY AND bboxMaxY > minY
      */
     async findNodesInViewport(userId: string, canvasId: string, query: ViewportQueryDto) {
-        await this.ensureCanvasOwnership(userId, canvasId);
+        await this.canvasSharesService.ensureCanvasAccess(userId, canvasId, CanvasRole.VIEWER);
 
         const { minX, minY, maxX, maxY, tileIds } = query;
 
@@ -264,18 +209,23 @@ export class CanvasesService {
      * - DELTA SYNC: nodesUpdated | nodesDeleted | edgesAdded | edgesDeleted → touch only changed rows
      */
     async sync(userId: string, canvasId: string, dto: SyncCanvasDto) {
-        await this.ensureCanvasOwnership(userId, canvasId);
+        await this.canvasSharesService.ensureCanvasAccess(userId, canvasId, CanvasRole.EDITOR);
 
+        let result;
         if (isFullSync(dto)) {
-            return this.runFullSync(userId, canvasId, dto);
-        }
-        if (hasDeltaPayload(dto)) {
-            return this.runDeltaSync(userId, canvasId, dto);
+            result = await this.runFullSync(userId, canvasId, dto);
+        } else if (hasDeltaPayload(dto)) {
+            result = await this.runDeltaSync(userId, canvasId, dto);
+        } else {
+            throw new BadRequestException(
+                'Either nodes+edges (full sync) or nodesUpdated/nodesDeleted/edgesAdded/edgesDeleted (delta sync) required',
+            );
         }
 
-        throw new BadRequestException(
-            'Either nodes+edges (full sync) or nodesUpdated/nodesDeleted/edgesAdded/edgesDeleted (delta sync) required',
-        );
+        // Broadcast to other clients silently in background
+        this.canvasesGateway.broadcastCanvasUpdate(canvasId, result, userId);
+
+        return result;
     }
 
     /**
@@ -542,8 +492,14 @@ export class CanvasesService {
 
             return {
                 nodeIdMap: Object.fromEntries(clientIdToNodeId),
-                updatedNodes: nodesArr.map((n) => n.id),
-                deletedNodes: nodesDel,
+                updatedNodes: nodesDel, // Keep legacy behavior for response 
+                // Adding the actual full delta payload for WebSockets
+                delta: {
+                    nodesUpdated: nodesArr,
+                    nodesDeleted: nodesDel,
+                    edgesAdded: edgesAdd,
+                    edgesDeleted: edgesDel,
+                },
                 viewport:
                     viewportData.viewportX !== undefined ||
                     viewportData.viewportY !== undefined ||
