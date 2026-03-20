@@ -63,6 +63,19 @@ enum PrePromptTemplateType {
   FEATURE
 }
 
+enum CanvasRole {
+  OWNER
+  EDITOR
+  COMMENTOR
+  VIEWER
+}
+
+enum ShareStatus {
+  ACTIVE
+  PENDING
+  REMOVED
+}
+
 // --- CORE MODELS ---
 
 model User {
@@ -80,6 +93,7 @@ model User {
   refreshToken String?
 
   canvases            Canvas[]
+  canvasShares        CanvasShare[]
   usageLogs           UsageLog[]
   prePromptTemplates  PrePromptTemplate[]
 
@@ -119,6 +133,7 @@ model Canvas {
   edges         Edge[]
   snapshots     CanvasSnapshot[]
   conversations AIConversation[]
+  shares        CanvasShare[]
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -201,6 +216,26 @@ model Edge {
   @@index([canvasId])
   @@index([sourceNodeId, targetNodeId])
   @@map("edges")
+}
+
+model CanvasShare {
+  id        String      @id @default(uuid())
+  canvasId  String
+  userId    String
+  role      CanvasRole  @default(EDITOR)
+  status    ShareStatus @default(PENDING)
+
+  invitedBy  String?
+  invitedAt  DateTime    @default(now())
+  acceptedAt DateTime?
+
+  canvas Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([canvasId, userId])
+  @@index([userId])
+  @@index([canvasId])
+  @@map("canvas_shares")
 }
 
 // --- AI & ANALYTICS ---

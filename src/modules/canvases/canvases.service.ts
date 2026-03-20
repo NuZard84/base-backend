@@ -13,8 +13,10 @@ import {
     SyncNodeItemDto,
 } from './dto/sync-node.dto';
 import { ViewportQueryDto } from './dto/viewport-query.dto';
-import { NodeRole, NodeType } from '@prisma/client';
+import { NodeRole, NodeType, CanvasRole } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
+import { CanvasSharesService } from './canvas-shares/canvas-shares.service';
+import { CanvasesGateway } from './canvases.gateway';
 
 /** Tile size for spatial indexing (Figma-style grid) */
 const TILE_SIZE = 512;
@@ -102,7 +104,11 @@ function isFullSync(dto: SyncCanvasDto): boolean {
 export class CanvasesService {
     private readonly logger = new Logger(CanvasesService.name);
 
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        private canvasSharesService: CanvasSharesService,
+        private canvasesGateway: CanvasesGateway,
+    ) {}
 
     private generateRandomString(length: number): string {
         const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -139,7 +145,12 @@ export class CanvasesService {
 
     async findAll(userId: string) {
         return this.prisma.canvas.findMany({
-            where: { userId },
+            where: { 
+                OR: [
+                    { userId },
+                    { shares: { some: { userId, status: 'ACTIVE' } } }
+                ]
+            },
             select: {
                 id: true,
                 name: true,
@@ -160,8 +171,10 @@ export class CanvasesService {
     }
 
     async findOne(userId: string, id: string) {
-        const canvas = await this.prisma.canvas.findFirst({
-            where: { id, userId },
+        await this.canvasSharesService.ensureCanvasAccess(userId, id, CanvasRole.VIEWER);
+
+        const canvas = await this.prisma.canvas.findUnique({
+            where: { id },
             include: {
                 nodes: {
                     orderBy: [{ zIndex: 'asc' }, { createdAt: 'asc' }],
@@ -182,7 +195,7 @@ export class CanvasesService {
      * Uses bbox overlap: bboxMinX < maxX AND bboxMaxX > minX AND bboxMinY < maxY AND bboxMaxY > minY
      */
     async findNodesInViewport(userId: string, canvasId: string, query: ViewportQueryDto) {
-        await this.ensureCanvasOwnership(userId, canvasId);
+        await this.canvasSharesService.ensureCanvasAccess(userId, canvasId, CanvasRole.VIEWER);
 
         const { minX, minY, maxX, maxY, tileIds } = query;
 
@@ -264,18 +277,23 @@ export class CanvasesService {
      * - DELTA SYNC: nodesUpdated | nodesDeleted | edgesAdded | edgesDeleted → touch only changed rows
      */
     async sync(userId: string, canvasId: string, dto: SyncCanvasDto) {
-        await this.ensureCanvasOwnership(userId, canvasId);
+        await this.canvasSharesService.ensureCanvasAccess(userId, canvasId, CanvasRole.EDITOR);
 
+        let result;
         if (isFullSync(dto)) {
-            return this.runFullSync(userId, canvasId, dto);
-        }
-        if (hasDeltaPayload(dto)) {
-            return this.runDeltaSync(userId, canvasId, dto);
+            result = await this.runFullSync(userId, canvasId, dto);
+        } else if (hasDeltaPayload(dto)) {
+            result = await this.runDeltaSync(userId, canvasId, dto);
+        } else {
+            throw new BadRequestException(
+                'Either nodes+edges (full sync) or nodesUpdated/nodesDeleted/edgesAdded/edgesDeleted (delta sync) required',
+            );
         }
 
-        throw new BadRequestException(
-            'Either nodes+edges (full sync) or nodesUpdated/nodesDeleted/edgesAdded/edgesDeleted (delta sync) required',
-        );
+        // Broadcast to other clients silently in background
+        this.canvasesGateway.broadcastCanvasUpdate(canvasId, result, userId);
+
+        return result;
     }
 
     /**
@@ -542,8 +560,14 @@ export class CanvasesService {
 
             return {
                 nodeIdMap: Object.fromEntries(clientIdToNodeId),
-                updatedNodes: nodesArr.map((n) => n.id),
-                deletedNodes: nodesDel,
+                updatedNodes: nodesDel, // Keep legacy behavior for response 
+                // Adding the actual full delta payload for WebSockets
+                delta: {
+                    nodesUpdated: nodesArr,
+                    nodesDeleted: nodesDel,
+                    edgesAdded: edgesAdd,
+                    edgesDeleted: edgesDel,
+                },
                 viewport:
                     viewportData.viewportX !== undefined ||
                     viewportData.viewportY !== undefined ||
