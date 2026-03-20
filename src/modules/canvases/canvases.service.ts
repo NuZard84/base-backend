@@ -13,79 +13,11 @@ import {
     SyncNodeItemDto,
 } from './dto/sync-node.dto';
 import { ViewportQueryDto } from './dto/viewport-query.dto';
-import { NodeRole, NodeType, CanvasRole } from '@prisma/client';
+import { CanvasRole } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { CanvasSharesService } from './canvas-shares/canvas-shares.service';
 import { CanvasesGateway } from './canvases.gateway';
-
-/** Tile size for spatial indexing (Figma-style grid) */
-const TILE_SIZE = 512;
-
-/** Map frontend node type to Prisma NodeType enum.
- * LoadingNode → RESPONSE: by sync time the node always has a response or error, never still loading. */
-const NODE_TYPE_MAP: Record<string, NodeType> = {
-    QuestionNode: NodeType.QUESTION,
-    ResponseNode: NodeType.RESPONSE,
-    LoadingNode: NodeType.RESPONSE, // Frontend uses LoadingNode; we persist as RESPONSE
-    ImageNode: NodeType.IMAGE,
-    CommentNode: NodeType.COMMENT,
-    NotesNode: NodeType.NOTES,
-    YoutubeNode: NodeType.EMBED,
-    default: NodeType.TEXT,
-};
-
-/** Compute tile IDs for a bounding box (Figma-style tiling) */
-function computeTileIds(minX: number, minY: number, maxX: number, maxY: number): number[] {
-    const tileXMin = Math.floor(minX / TILE_SIZE);
-    const tileYMin = Math.floor(minY / TILE_SIZE);
-    const tileXMax = Math.floor(maxX / TILE_SIZE);
-    const tileYMax = Math.floor(maxY / TILE_SIZE);
-    const ids: number[] = [];
-    for (let ty = tileYMin; ty <= tileYMax; ty++) {
-        for (let tx = tileXMin; tx <= tileXMax; tx++) {
-            ids.push(ty * 10000 + tx);
-        }
-    }
-    return ids;
-}
-
-/** Map frontend node type to Prisma enum */
-function mapNodeType(type?: string): NodeType {
-    return type ? NODE_TYPE_MAP[type] ?? NODE_TYPE_MAP.default : NodeType.TEXT;
-}
-
-/** Prepare node data for create/update (shared by full and delta sync). Uses canvasId for batch ops. */
-function prepareNodeData(
-    node: SyncNodeItemDto,
-    canvasId: string,
-): Prisma.NodeUncheckedCreateInput {
-    const w = node.width ?? 360;
-    const h = node.height ?? 240;
-    const bboxMinX = node.x;
-    const bboxMinY = node.y;
-    const bboxMaxX = node.x + w;
-    const bboxMaxY = node.y + h;
-    const tileIdsArr = computeTileIds(bboxMinX, bboxMinY, bboxMaxX, bboxMaxY);
-    const nodeType = mapNodeType(node.type);
-
-    return {
-        canvasId,
-        clientId: node.id,
-        x: node.x,
-        y: node.y,
-        width: w,
-        height: h,
-        zIndex: node.zIndex ?? 0,
-        nodeType,
-        role: NodeRole.INPUT,
-        content: (node.data ?? {}) as object,
-        bboxMinX,
-        bboxMinY,
-        bboxMaxX,
-        bboxMaxY,
-        tileIds: tileIdsArr,
-    };
-}
+import { prepareNodeData } from './canvas-utils';
 
 function hasDeltaPayload(dto: SyncCanvasDto): boolean {
     return (
