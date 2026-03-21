@@ -25,13 +25,8 @@ import type {
 
 @WebSocketGateway({
     namespace: 'canvases',
-    cors: {
-        origin: process.env.FRONTEND_URL
-            ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
-            : true,
-        // JWT is sent in Socket.io auth payload, not cookies — avoid creds+CORS edge cases
-        credentials: false,
-    },
+    // Server-level CORS is set in SocketIoAdapter; keep * here so namespace matches (JWT enforces auth)
+    cors: { origin: '*', methods: ['GET', 'POST'] },
 })
 export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()

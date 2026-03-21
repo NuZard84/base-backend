@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { SocketIoAdapter } from './socket-io.adapter';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
@@ -26,6 +27,8 @@ async function bootstrap() {
   // Cloud Run / load balancers set X-Forwarded-*; needed for correct client IPs and some proxy + WS behavior
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.set('trust proxy', 1);
+
+  app.useWebSocketAdapter(new SocketIoAdapter(app));
 
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ limit: '10mb', extended: true }));
