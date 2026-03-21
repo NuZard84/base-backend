@@ -4,6 +4,7 @@ import {
     SubscribeMessage,
     OnGatewayConnection,
     OnGatewayDisconnect,
+    OnGatewayInit,
     ConnectedSocket,
     MessageBody,
 } from '@nestjs/websockets';
@@ -39,11 +40,14 @@ import type {
     // Polling first, then WebSocket upgrade (must match client). WebSocket-only server rejects polling → "Transport unknown".
     transports: ['polling', 'websocket'],
 })
-export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class CanvasesGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
 
     private readonly logger = new Logger(CanvasesGateway.name);
+
+    /** Verbose collab logs (ops, cursors, HTTP→socket). Temporarily always on; set to `false` or wire env when done debugging. */
+    private readonly socketDebug = true;
 
     constructor(
         private jwtService: JwtService,
@@ -53,14 +57,37 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         private prisma: PrismaService,
     ) {}
 
+    /** Confirms the `/canvases` namespace gateway is mounted at startup. */
+    afterInit() {
+        this.logger.log('Collab: Socket.IO namespace `/canvases` is ready (verbose [SOCKET_DEBUG] logs enabled)');
+    }
+
+    /** Verbose logs (currently always on via `socketDebug`). */
+    private debugCollab(message: string, meta?: Record<string, unknown>) {
+        if (!this.socketDebug) return;
+        const suffix = meta && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
+        this.logger.log(`[SOCKET_DEBUG] ${message}${suffix}`);
+    }
+
     // ── Connection lifecycle ──────────────────────────────────────────────────
 
     async handleConnection(client: Socket) {
+        const transportHint =
+            (client.conn?.transport?.name as string | undefined) ??
+            (client.handshake.query?.transport as string | undefined) ??
+            'unknown';
+
         try {
             const token =
                 client.handshake.auth?.token ||
                 client.handshake.headers['authorization']?.split(' ')[1];
-            if (!token) { client.disconnect(); return; }
+            if (!token) {
+                this.logger.warn(
+                    `Collab: socket rejected — no JWT (socketId=${client.id}, transport=${transportHint})`,
+                );
+                client.disconnect();
+                return;
+            }
 
             const payload = this.jwtService.verify(token, {
                 secret: this.configService.get<string>('JWT_SECRET'),
@@ -68,9 +95,19 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
             client.data.userId = payload.sub as string;
             client.data.canvasIds = new Set<string>();
-            this.logger.log(`Connected: ${client.id} (user=${payload.sub})`);
+            this.logger.log(
+                `Collab: socket connected socketId=${client.id} userId=${payload.sub} transport=${transportHint}`,
+            );
+            this.debugCollab('handshake', {
+                socketId: client.id,
+                userId: payload.sub,
+                transport: transportHint,
+                address: client.handshake.address,
+            });
         } catch (e) {
-            this.logger.warn(`Auth failed for ${client.id}: ${e.message}`);
+            this.logger.warn(
+                `Collab: socket auth failed socketId=${client.id} transport=${transportHint}: ${(e as Error).message}`,
+            );
             client.disconnect();
         }
     }
@@ -88,7 +125,9 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
                     .emit('presence_left', { canvasId, userId });
             }
         }
-        this.logger.log(`Disconnected: ${client.id}`);
+        this.logger.log(
+            `Collab: socket disconnected socketId=${client.id} userId=${userId ?? 'n/a'} rooms=${canvasIds?.size ?? 0}`,
+        );
     }
 
     // ── Room management ───────────────────────────────────────────────────────
@@ -99,11 +138,19 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         @MessageBody() canvasId: string,
     ) {
         const userId = client.data.userId as string;
-        if (!userId || !canvasId) return;
+        if (!userId || !canvasId) {
+            this.logger.warn(
+                `Collab: join_canvas ignored — missing userId or canvasId (socketId=${client.id})`,
+            );
+            return;
+        }
 
         try {
             await this.canvasSharesService.ensureCanvasAccess(userId, canvasId, CanvasRole.VIEWER);
         } catch {
+            this.logger.warn(
+                `Collab: join_canvas denied — no access userId=${userId} canvasId=${canvasId} socketId=${client.id}`,
+            );
             return { event: 'error', data: { message: 'Cannot join canvas room' } };
         }
 
@@ -137,7 +184,14 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         // Broadcast joiner's presence to existing peers
         client.broadcast.to(roomName).emit('presence_joined', { canvasId, user: presence });
 
-        this.logger.log(`${client.id} joined canvas:${canvasId}`);
+        this.logger.log(
+            `Collab: join_canvas ok userId=${userId} canvasId=${canvasId} socketId=${client.id} peersInRoom=${uniquePeerIds.length}`,
+        );
+        this.debugCollab('join_canvas detail', {
+            canvasId,
+            userId,
+            peerIds: uniquePeerIds,
+        });
         return { event: 'joined', data: { canvasId } };
     }
 
@@ -157,7 +211,9 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         void this.collabService.forceFlush(canvasId);
 
         this.server.to(roomName).emit('presence_left', { canvasId, userId });
-        this.logger.log(`${client.id} left canvas:${canvasId}`);
+        this.logger.log(
+            `Collab: leave_canvas userId=${userId} canvasId=${canvasId} socketId=${client.id}`,
+        );
     }
 
     // ── Real-time op relay (no DB, sub-millisecond path) ─────────────────────
@@ -188,6 +244,12 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         // 2. Queue for debounced DB write (fire-and-forget, non-blocking)
         this.collabService.queueOp(canvasId, op);
+        this.debugCollab('canvas_op relayed', {
+            canvasId,
+            userId,
+            opType: op.type,
+            nodeId: op.nodeId,
+        });
     }
 
     /**
@@ -207,6 +269,12 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         if (!userId || !payload?.canvasId) return;
 
         client.broadcast.to(`canvas:${payload.canvasId}`).emit('cursor_updated', {
+            canvasId: payload.canvasId,
+            userId,
+            x: payload.x,
+            y: payload.y,
+        });
+        this.debugCollab('cursor_move', {
             canvasId: payload.canvasId,
             userId,
             x: payload.x,
@@ -238,6 +306,11 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         // Update presence async (non-blocking)
         void this.collabService.setPresence(payload.canvasId, userId, {
             selectedNodeIds: payload.selectedNodeIds,
+        });
+        this.debugCollab('selection_change', {
+            canvasId: payload.canvasId,
+            userId,
+            count: payload.selectedNodeIds?.length ?? 0,
         });
     }
 
@@ -285,6 +358,11 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
             delta: payload.delta ?? null,
             nodeCount: payload.nodeCount,
             edgeCount: payload.edgeCount,
+        });
+        this.debugCollab('broadcastCanvasUpdate (HTTP → socket)', {
+            canvasId,
+            senderUserId,
+            hasDelta: !!payload.delta,
         });
     }
 }
