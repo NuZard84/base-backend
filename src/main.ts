@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { SocketIoAdapter } from './adapters/socket-io.adapter';
 import { json, urlencoded } from 'express';
 
 const requiredEnvVars = [
@@ -27,6 +28,7 @@ async function bootstrap() {
   app.use(urlencoded({ limit: '10mb', extended: true }));
 
   app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useWebSocketAdapter(new SocketIoAdapter(app));
 
   const config = new DocumentBuilder()
     .setTitle('Base Backend API')
