@@ -6,11 +6,6 @@
 #     projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider
 #   - GCP_SA_EMAIL: Service account email, e.g. github-actions@PROJECT_ID.iam.gserviceaccount.com
 #
-# Cloud Run env vars (set in GCP Console or via --update-env-vars):
-#   - REDIS_URL or (REDIS_HOST, REDIS_PORT, REDIS_PASSWORD): Required for Socket.IO Redis adapter
-#     (multi-instance WebSocket support). Use Memorystore or Upstash.
-#   - FRONTEND_URL: Comma-separated allowed CORS origins
-#
 # See .github/docs/WORKLOAD_IDENTITY_SETUP.md for GCP setup instructions.
 
 name: Deploy to Production
@@ -60,11 +55,7 @@ jobs:
           gcloud run deploy ${{ env.SERVICE }} \
             --image ${{ env.IMAGE }} \
             --region ${{ env.REGION }} \
-            --platform managed \
-            --timeout=3600 \
-            --min-instances=1 \
-            --no-use-http2 \
-            --set-env-vars="NODE_ENV=production"
+            --platform managed
 
       - name: Show service URL
         run: |

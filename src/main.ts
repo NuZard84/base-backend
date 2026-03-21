@@ -4,8 +4,6 @@ import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { json, urlencoded } from 'express';
-import Redis from 'ioredis';
-import { RedisIoAdapter } from './redis/redis-io.adapter';
 
 const requiredEnvVars = [
   'JWT_SECRET',
@@ -72,23 +70,6 @@ async function bootstrap() {
       transform: true,
     }),
   );
-
-  // Redis adapter for Socket.IO — required for multi-instance Cloud Run (WebSocket cross-instance broadcast)
-  const redisUrl = process.env.REDIS_URL;
-  const redisHost = process.env.REDIS_HOST;
-  const redisPort = process.env.REDIS_PORT;
-  if (redisUrl || (redisHost && redisPort)) {
-    const pubClient = redisUrl
-      ? new Redis(redisUrl)
-      : new Redis({
-          host: redisHost,
-          port: Number(redisPort),
-          ...(process.env.REDIS_USERNAME ? { username: process.env.REDIS_USERNAME } : {}),
-          password: process.env.REDIS_PASSWORD,
-        });
-    const subClient = pubClient.duplicate();
-    app.useWebSocketAdapter(new RedisIoAdapter(app, pubClient, subClient));
-  }
 
   const port = Number(process.env.PORT) || 8080;
   await app.listen(port, '0.0.0.0'); // Cloud Run requires listening on 0.0.0.0
