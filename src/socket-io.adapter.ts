@@ -14,11 +14,15 @@ export class SocketIoAdapter extends IoAdapter {
   createIOServer(port: number, options?: ServerOptions): any {
     return super.createIOServer(port, {
       ...options,
+      // Default Engine.IO path; keep explicit so it matches socket.io-client defaults
+      path: '/socket.io',
       cors: {
         origin: '*',
         methods: ['GET', 'POST'],
       },
       perMessageDeflate: false,
+      // Handshake can exceed default during Cloud Run cold start
+      connectTimeout: 45_000,
       pingTimeout: 60_000,
       pingInterval: 25_000,
     });
