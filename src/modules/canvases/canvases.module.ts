@@ -9,7 +9,15 @@ import { CanvasCollabService } from './canvas-collab.service';
 import { RedisModule } from '../../redis/redis.module';
 
 @Module({
-    imports: [JwtModule.register({}), RedisModule],
+    imports: [
+        JwtModule.register({
+            secret: process.env.JWT_SECRET,
+            signOptions: {
+                expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN),
+            },
+        }),
+        RedisModule,
+    ],
     controllers: [CanvasesController, CanvasSharesController],
     providers: [CanvasesService, CanvasSharesService, CanvasesGateway, CanvasCollabService],
     exports: [CanvasSharesService],

@@ -24,8 +24,14 @@ import type {
 } from './dto/canvas-op.dto';
 
 @WebSocketGateway({
-    cors: { origin: '*' },
     namespace: 'canvases',
+    cors: {
+        origin: process.env.FRONTEND_URL
+            ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
+            : true,
+        // JWT is sent in Socket.io auth payload, not cookies — avoid creds+CORS edge cases
+        credentials: false,
+    },
 })
 export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
