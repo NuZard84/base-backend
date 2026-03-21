@@ -24,9 +24,8 @@ import type {
 } from './dto/canvas-op.dto';
 
 @WebSocketGateway({
+    cors: { origin: '*' },
     namespace: 'canvases',
-    // Server-level CORS is set in SocketIoAdapter; keep * here so namespace matches (JWT enforces auth)
-    cors: { origin: '*', methods: ['GET', 'POST'] },
 })
 export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
