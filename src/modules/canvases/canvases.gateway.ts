@@ -72,6 +72,9 @@ export class CanvasesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     // ── Connection lifecycle ──────────────────────────────────────────────────
 
     async handleConnection(client: Socket) {
+        // Log first so Cloud Run logs always show the namespace received a connection (before auth).
+        this.logger.log(`Collab: handshake started socketId=${client.id} nsp=/canvases`);
+
         const transportHint =
             (client.conn?.transport?.name as string | undefined) ??
             (client.handshake.query?.transport as string | undefined) ??
