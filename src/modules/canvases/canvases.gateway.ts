@@ -26,6 +26,8 @@ import type {
 @WebSocketGateway({
     cors: { origin: '*' },
     namespace: 'canvases',
+    // Explicit transports so polling handshakes always match Engine.IO (avoids "Transport unknown")
+    transports: ['polling', 'websocket'],
 })
 export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
