@@ -20,9 +20,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
+    const username = process.env.REDIS_USERNAME;
     this.redis = new Redis({
       host,
       port: Number(port),
+      ...(username ? { username } : {}),
       password: process.env.REDIS_PASSWORD,
       retryStrategy: (times) => Math.min(times * 50, 2000),
       connectTimeout: 5000,
