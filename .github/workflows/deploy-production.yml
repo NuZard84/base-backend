@@ -46,7 +46,6 @@ jobs:
             --image ${{ env.IMAGE }} \
             --region ${{ env.REGION }} \
             --platform managed \
-            --session-affinity \
             --timeout 3600 \
             --min-instances=1 \
             --no-use-http2 \

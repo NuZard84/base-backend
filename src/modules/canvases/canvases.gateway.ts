@@ -35,12 +35,8 @@ import type {
               : '*',
         credentials: true,
     },
-    // Skip long-polling entirely.
-    // Cloud Run has a 60 s HTTP timeout that kills polling connections,
-    // and without sticky sessions polling breaks across multiple instances.
-    transports: ['websocket'],
     namespace: 'canvases',
-    // Explicit transports so polling handshakes always match Engine.IO (avoids "Transport unknown")
+    // Polling first, then WebSocket upgrade (must match client). WebSocket-only server rejects polling → "Transport unknown".
     transports: ['polling', 'websocket'],
 })
 export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect {
