@@ -50,7 +50,6 @@ jobs:
             --min-instances=1 \
             --no-use-http2 \
             --set-env-vars="NODE_ENV=production" \
-            --set-env-vars="PORT=${{ secrets.PORT }}" \
             --set-env-vars="REDIS_HOST=${{ secrets.REDIS_HOST }}" \
             --set-env-vars="REDIS_PORT=${{ secrets.REDIS_PORT }}" \
             --set-env-vars="REDIS_USERNAME=${{ secrets.REDIS_USERNAME }}" \
