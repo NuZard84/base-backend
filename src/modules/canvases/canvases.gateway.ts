@@ -24,7 +24,21 @@ import type {
 } from './dto/canvas-op.dto';
 
 @WebSocketGateway({
-    cors: { origin: '*' },
+    // Mirror the same origin list as main.ts app.enableCors() so the
+    // Socket.IO handshake is not blocked by the Express CORS middleware.
+    // Falls back to '*' only in non-production (dev/test).
+    cors: {
+        origin: process.env.FRONTEND_URL
+            ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
+            : process.env.NODE_ENV === 'production'
+              ? false
+              : '*',
+        credentials: true,
+    },
+    // Skip long-polling entirely.
+    // Cloud Run has a 60 s HTTP timeout that kills polling connections,
+    // and without sticky sessions polling breaks across multiple instances.
+    transports: ['websocket'],
     namespace: 'canvases',
     // Explicit transports so polling handshakes always match Engine.IO (avoids "Transport unknown")
     transports: ['polling', 'websocket'],
