@@ -55,7 +55,9 @@ jobs:
           gcloud run deploy ${{ env.SERVICE }} \
             --image ${{ env.IMAGE }} \
             --region ${{ env.REGION }} \
-            --platform managed
+            --platform managed \
+            --session-affinity \
+            --timeout 3600
 
       - name: Show service URL
         run: |
