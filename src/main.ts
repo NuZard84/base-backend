@@ -71,7 +71,7 @@ async function bootstrap() {
     }),
   );
 
-  const port = Number(process.env.PORT) || 8080;
+  const port = Number(process.env.PORT) || 3001;
   await app.listen(port, '0.0.0.0'); // Cloud Run requires listening on 0.0.0.0
   console.log(`🚀 Server running on port ${port}`);
 }
