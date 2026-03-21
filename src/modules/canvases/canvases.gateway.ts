@@ -23,9 +23,12 @@ import type {
     ForceFlushPayload,
 } from './dto/canvas-op.dto';
 
-// cors and transports are configured at the server level via SocketIoAdapter in main.ts.
-// Namespace-level options here are limited to what Socket.IO namespaces actually support.
-@WebSocketGateway({ namespace: 'canvases' })
+// cors, transports, ping settings are configured at the server level via SocketIoAdapter.
+// No namespace declared here — the default namespace '/' is used and rooms (canvas:{id})
+// provide all the per-canvas isolation needed. A named namespace caused "Invalid namespace"
+// errors because NestJS can call createIOServer() multiple times, and a namespace registered
+// on the second Server instance is unreachable (the first instance wins the HTTP upgrade).
+@WebSocketGateway()
 export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
