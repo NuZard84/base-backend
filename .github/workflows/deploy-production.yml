@@ -1,13 +1,3 @@
-# Deploy base-backend to GCP Cloud Run on push to main
-#
-# Uses Workload Identity Federation (no service account keys required).
-# Required GitHub secrets:
-#   - WIF_PROVIDER: Full workload identity provider path, e.g.
-#     projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-#   - GCP_SA_EMAIL: Service account email, e.g. github-actions@PROJECT_ID.iam.gserviceaccount.com
-#
-# See .github/docs/WORKLOAD_IDENTITY_SETUP.md for GCP setup instructions.
-
 name: Deploy to Production
 
 on:
@@ -55,7 +45,24 @@ jobs:
           gcloud run deploy ${{ env.SERVICE }} \
             --image ${{ env.IMAGE }} \
             --region ${{ env.REGION }} \
-            --platform managed
+            --platform managed \
+            --timeout=3600 \
+            --min-instances=1 \
+            --no-use-http2 \
+            --set-env-vars="NODE_ENV=production" \
+            --set-env-vars="PORT=${{ secrets.PORT }}" \
+            --set-env-vars="REDIS_HOST=${{ secrets.REDIS_HOST }}" \
+            --set-env-vars="REDIS_PORT=${{ secrets.REDIS_PORT }}" \
+            --set-env-vars="REDIS_USERNAME=${{ secrets.REDIS_USERNAME }}" \
+            --set-env-vars="REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}" \
+            --set-env-vars="JWT_SECRET=${{ secrets.JWT_SECRET }}" \
+            --set-env-vars="EXPIRE_ACCESS_TOKEN=${{ secrets.EXPIRE_ACCESS_TOKEN }}" \
+            --set-env-vars="EXPIRE_REFRESH_TOKEN=${{ secrets.EXPIRE_REFRESH_TOKEN }}" \
+            --set-env-vars="GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
+            --set-env-vars="GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+            --set-env-vars="GOOGLE_CALLBACK_URL=${{ secrets.GOOGLE_CALLBACK_URL }}" \
+            --set-env-vars="FRONTEND_URL=${{ secrets.FRONTEND_URL }}" \
+            --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}"
 
       - name: Show service URL
         run: |
