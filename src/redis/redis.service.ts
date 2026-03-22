@@ -72,6 +72,23 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return result === 1;
   }
 
+  // ── List operations (used for op-log) ────────────────────────────────────
+
+  async rpush(key: string, ...values: string[]): Promise<number> {
+    this.guard();
+    return await this.redis!.rpush(key, ...values);
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    this.guard();
+    return await this.redis!.lrange(key, start, stop);
+  }
+
+  async ltrim(key: string, start: number, stop: number): Promise<void> {
+    this.guard();
+    await this.redis!.ltrim(key, start, stop);
+  }
+
   onModuleDestroy() {
     if (this.redis) {
       this.redis.quit();

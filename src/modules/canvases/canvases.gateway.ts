@@ -4,6 +4,7 @@ import {
     SubscribeMessage,
     OnGatewayConnection,
     OnGatewayDisconnect,
+    OnGatewayInit,
     ConnectedSocket,
     MessageBody,
 } from '@nestjs/websockets';
@@ -16,11 +17,12 @@ import { CanvasCollabService, UserPresence } from './canvas-collab.service';
 import { PrismaService } from 'prisma/prisma.service';
 import { CanvasRole } from '@prisma/client';
 import type {
-    CanvasOp,
     CanvasOpPayload,
     CursorMovePayload,
     SelectionChangePayload,
     ForceFlushPayload,
+    JoinCanvasPayload,
+    SyncSincePayload,
 } from './dto/canvas-op.dto';
 
 // cors, transports, ping settings are configured at the server level via SocketIoAdapter.
@@ -42,6 +44,14 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         private collabService: CanvasCollabService,
         private prisma: PrismaService,
     ) {}
+
+    afterInit() {
+        // Wire the sync-error callback so the collab service can broadcast
+        // to a canvas room when all DB flush retries are exhausted.
+        this.collabService.onSyncError = (payload) => {
+            this.server.to(`canvas:${payload.canvasId}`).emit('sync_error', payload);
+        };
+    }
 
     // ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -73,9 +83,7 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
             for (const canvasId of canvasIds) {
                 void this.collabService.removePresence(canvasId, userId);
                 void this.collabService.forceFlush(canvasId);
-                this.server
-                    .to(`canvas:${canvasId}`)
-                    .emit('presence_left', { canvasId, userId });
+                this.server.to(`canvas:${canvasId}`).emit('presence_left', { canvasId, userId });
             }
         }
         this.logger.log(`Disconnected: ${client.id}`);
@@ -83,11 +91,26 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     // ── Room management ───────────────────────────────────────────────────────
 
+    /**
+     * Join a canvas room and optionally catch up on missed ops.
+     *
+     * Client sends: { canvasId, lastSeq? }
+     *   - lastSeq: the last serverSeq the client saw (omit on first join)
+     *
+     * Server responds with:
+     *   - 'joined'        { canvasId, currentSeq }
+     *   - 'presence_list' { canvasId, users }
+     *   - 'ops_catchup'   { canvasId, ops }   ← only when lastSeq is provided
+     */
     @SubscribeMessage('join_canvas')
     async handleJoinCanvas(
         @ConnectedSocket() client: Socket,
-        @MessageBody() canvasId: string,
+        @MessageBody() payload: JoinCanvasPayload | string,
     ) {
+        // Accept both old string format and new object format
+        const canvasId = typeof payload === 'string' ? payload : payload.canvasId;
+        const lastSeq  = typeof payload === 'string' ? undefined : payload.lastSeq;
+
         const userId = client.data.userId as string;
         if (!userId || !canvasId) return;
 
@@ -101,21 +124,25 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         await client.join(roomName);
         (client.data.canvasIds as Set<string>).add(canvasId);
 
-        // Resolve user name once per join (infrequent)
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: { name: true },
-        });
+        // Run user lookup, seq fetch, and presence set in parallel
+        const [user, currentSeq] = await Promise.all([
+            this.prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
+            this.collabService.getCurrentSeq(canvasId),
+        ]);
+
         const presence = await this.collabService.setPresence(canvasId, userId, {
             name: user?.name ?? 'Unknown',
         });
 
-        // Send current presence list to the joiner
+        // Send presence list to the joiner
         const sockets = await this.server.in(roomName).fetchSockets();
-        const peerUserIds = sockets
-            .map(s => s.data.userId as string)
-            .filter(id => id && id !== userId);
-        const uniquePeerIds = [...new Set(peerUserIds)];
+        const uniquePeerIds = [
+            ...new Set(
+                sockets
+                    .map(s => s.data.userId as string)
+                    .filter(id => id && id !== userId),
+            ),
+        ];
         const peers = await Promise.all(
             uniquePeerIds.map(id => this.collabService.getPresence(canvasId, id)),
         );
@@ -124,11 +151,19 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
             users: peers.filter(Boolean) as UserPresence[],
         });
 
-        // Broadcast joiner's presence to existing peers
+        // Catch up on missed ops if the client provided lastSeq
+        if (lastSeq !== undefined && lastSeq < currentSeq) {
+            const missedOps = await this.collabService.getOpsSince(canvasId, lastSeq);
+            if (missedOps.length > 0) {
+                client.emit('ops_catchup', { canvasId, ops: missedOps });
+            }
+        }
+
+        // Notify existing peers
         client.broadcast.to(roomName).emit('presence_joined', { canvasId, user: presence });
 
-        this.logger.log(`${client.id} joined canvas:${canvasId}`);
-        return { event: 'joined', data: { canvasId } };
+        this.logger.log(`${client.id} joined canvas:${canvasId} (seq=${currentSeq})`);
+        return { event: 'joined', data: { canvasId, currentSeq } };
     }
 
     @SubscribeMessage('leave_canvas')
@@ -150,17 +185,18 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         this.logger.log(`${client.id} left canvas:${canvasId}`);
     }
 
-    // ── Real-time op relay (no DB, sub-millisecond path) ─────────────────────
+    // ── Real-time op relay ────────────────────────────────────────────────────
 
     /**
-     * Relay a canvas op (node_move, node_resize, node_style, node_zindex) to peers
-     * AND queue it for debounced DB persistence (every 500 ms).
+     * Relay a canvas op to peers, assign a server sequence number, append to
+     * op-log for catch-up, and queue for debounced DB persistence.
      *
-     * Client sends: { canvasId, op: CanvasOp }
-     * Peers receive: 'op_relayed' { canvasId, senderUserId, op }
+     * Client sends:  { canvasId, op: { type, nodeId, data, seq? } }
+     * Peers receive: 'op_relayed'  { canvasId, senderUserId, op, serverSeq }
+     * Sender gets:   'op_ack'      { canvasId, clientSeq, serverSeq }
      */
     @SubscribeMessage('canvas_op')
-    handleCanvasOp(
+    async handleCanvasOp(
         @ConnectedSocket() client: Socket,
         @MessageBody() payload: CanvasOpPayload,
     ) {
@@ -169,24 +205,67 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         const { canvasId, op } = payload;
 
-        // 1. Relay to peers immediately — before any async work
+        // Assign server sequence number (Redis INCR, non-blocking on failure)
+        const serverSeq = await this.collabService.nextSeq(canvasId);
+
+        // 1. Relay to peers immediately with serverSeq so they can detect gaps
         client.broadcast.to(`canvas:${canvasId}`).emit('op_relayed', {
             canvasId,
             senderUserId: userId,
             op,
+            serverSeq,
         });
 
-        // 2. Queue for debounced DB write (fire-and-forget, non-blocking)
+        // 2. Acknowledge to sender so they know the op reached the server
+        client.emit('op_ack', {
+            canvasId,
+            clientSeq: op.seq,
+            serverSeq,
+        });
+
+        // 3. Append to op-log so reconnecting clients can catch up (non-blocking)
+        void this.collabService.appendOpLog(canvasId, {
+            serverSeq,
+            timestamp: Date.now(),
+            senderUserId: userId,
+            op,
+        });
+
+        // 4. Queue for debounced DB persistence
         this.collabService.queueOp(canvasId, op);
     }
 
     /**
-     * Relay cursor position to peers.
-     * Cursor updates are ephemeral: no DB write, no Redis — just relay.
-     * High-frequency (~60fps), so we keep this as lean as possible.
+     * Catch-up request: client sends its last known serverSeq and receives
+     * all ops it missed. Use this after a reconnect if join_canvas didn't
+     * include lastSeq, or to explicitly request a replay.
      *
-     * Client sends: { canvasId, x, y }
-     * Peers receive: 'cursor_updated' { canvasId, userId, x, y }
+     * Client sends:  { canvasId, lastSeq }
+     * Client gets:   'ops_catchup' { canvasId, ops, currentSeq }
+     */
+    @SubscribeMessage('sync_since')
+    async handleSyncSince(
+        @ConnectedSocket() client: Socket,
+        @MessageBody() payload: SyncSincePayload,
+    ) {
+        const userId = client.data.userId as string;
+        if (!userId || !payload?.canvasId) return;
+
+        const [missedOps, currentSeq] = await Promise.all([
+            this.collabService.getOpsSince(payload.canvasId, payload.lastSeq),
+            this.collabService.getCurrentSeq(payload.canvasId),
+        ]);
+
+        client.emit('ops_catchup', {
+            canvasId: payload.canvasId,
+            ops: missedOps,
+            currentSeq,
+        });
+    }
+
+    /**
+     * Cursor relay — ephemeral, no DB, no op-log.
+     * High-frequency (~60fps); keep it as lean as possible.
      */
     @SubscribeMessage('cursor_move')
     handleCursorMove(
@@ -205,10 +284,7 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     /**
-     * Relay selection changes to peers and update presence in Redis.
-     *
-     * Client sends: { canvasId, selectedNodeIds }
-     * Peers receive: 'selection_updated' { canvasId, userId, selectedNodeIds }
+     * Selection relay — relay immediately, update presence async.
      */
     @SubscribeMessage('selection_change')
     handleSelectionChange(
@@ -218,24 +294,19 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         const userId = client.data.userId as string;
         if (!userId || !payload?.canvasId) return;
 
-        // Relay to peers immediately
         client.broadcast.to(`canvas:${payload.canvasId}`).emit('selection_updated', {
             canvasId: payload.canvasId,
             userId,
             selectedNodeIds: payload.selectedNodeIds,
         });
 
-        // Update presence async (non-blocking)
         void this.collabService.setPresence(payload.canvasId, userId, {
             selectedNodeIds: payload.selectedNodeIds,
         });
     }
 
     /**
-     * Force-flush pending DB writes for a canvas.
-     * Call this on mouse-up / commit to ensure final state is persisted without waiting for timer.
-     *
-     * Client sends: { canvasId }
+     * Force-flush pending DB writes immediately (call on mouse-up / explicit save).
      */
     @SubscribeMessage('canvas_force_flush')
     async handleForceFlush(
@@ -251,10 +322,6 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     // ── Called by CanvasesService after HTTP sync ─────────────────────────────
 
-    /**
-     * Broadcast the result of an HTTP sync (structural changes: create/delete nodes/edges).
-     * Sends only the delta needed by collaborators; nodeIdMap is returned via HTTP to the sender.
-     */
     broadcastCanvasUpdate(
         canvasId: string,
         payload: {
