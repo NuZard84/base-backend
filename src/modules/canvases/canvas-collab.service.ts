@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
-import { CanvasOp } from './dto/canvas-op.dto';
+import { CanvasOp, OpLogEntry } from './dto/canvas-op.dto';
 import { computeTileIds } from './canvas-utils';
 
 const FLUSH_INTERVAL_MS = 500;
 const PRESENCE_TTL_SECONDS = 30;
+const OPLOG_MAX_SIZE = 500;     // keep last 500 ops per canvas in Redis
+const OPLOG_TTL_SECONDS = 7200; // 2 hours — enough for brief disconnects
+const MAX_FLUSH_RETRIES = 3;
+const FLUSH_RETRY_BASE_MS = 200;
 
 interface PendingNodeState {
     clientId: string;
@@ -19,7 +23,8 @@ interface PendingNodeState {
     width?: number;
     height?: number;
     zIndex?: number;
-    style?: Record<string, unknown>;
+    /** style ops are accumulated separately so they can be merged at DB level */
+    styleOp?: Record<string, unknown>;
 }
 
 export interface UserPresence {
@@ -31,6 +36,13 @@ export interface UserPresence {
     lastSeen: number;
 }
 
+/** Emitted to a canvas room when all retries for a flush are exhausted */
+export interface SyncErrorPayload {
+    canvasId: string;
+    affectedNodeIds: string[];
+    message: string;
+}
+
 @Injectable()
 export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(CanvasCollabService.name);
@@ -38,6 +50,9 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
     /** Map<canvasId, Map<clientId, PendingNodeState>> */
     private pendingWrites = new Map<string, Map<string, PendingNodeState>>();
     private flushTimer: NodeJS.Timeout | null = null;
+
+    /** Callback injected by gateway to broadcast sync errors to a canvas room */
+    onSyncError?: (payload: SyncErrorPayload) => void;
 
     private readonly COLORS = [
         '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
@@ -58,6 +73,64 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
         void this.flushAll();
     }
 
+    // ── Op sequencing ─────────────────────────────────────────────────────────
+
+    /**
+     * Atomically increment and return the next server sequence number for a canvas.
+     * Used to totally order all ops so clients can detect gaps and catch up.
+     */
+    async nextSeq(canvasId: string): Promise<number> {
+        try {
+            return await this.redis.incr(`canvas:${canvasId}:seq`);
+        } catch {
+            // Redis unavailable — return 0 so the op still goes through,
+            // just without sequencing guarantees.
+            return 0;
+        }
+    }
+
+    async getCurrentSeq(canvasId: string): Promise<number> {
+        try {
+            const raw = await this.redis.get(`canvas:${canvasId}:seq`);
+            return raw ? parseInt(raw, 10) : 0;
+        } catch {
+            return 0;
+        }
+    }
+
+    // ── Op log ────────────────────────────────────────────────────────────────
+
+    /**
+     * Append an op to the canvas op-log in Redis.
+     * Trims to OPLOG_MAX_SIZE so memory stays bounded.
+     * The TTL is refreshed on every write so active canvases never expire.
+     */
+    async appendOpLog(canvasId: string, entry: OpLogEntry): Promise<void> {
+        const key = `canvas:${canvasId}:oplog`;
+        try {
+            await this.redis.rpush(key, JSON.stringify(entry));
+            await this.redis.ltrim(key, -OPLOG_MAX_SIZE, -1);
+            await this.redis.expire(key, OPLOG_TTL_SECONDS);
+        } catch {
+            // Non-critical — catch-up will just fall back to a full HTTP sync
+        }
+    }
+
+    /**
+     * Return all ops with serverSeq > lastSeq.
+     * Called on reconnect so the client can replay what it missed.
+     */
+    async getOpsSince(canvasId: string, lastSeq: number): Promise<OpLogEntry[]> {
+        try {
+            const raw = await this.redis.lrange(`canvas:${canvasId}:oplog`, 0, -1);
+            return raw
+                .map(s => JSON.parse(s) as OpLogEntry)
+                .filter(e => e.serverSeq > lastSeq);
+        } catch {
+            return [];
+        }
+    }
+
     // ── Write buffer ──────────────────────────────────────────────────────────
 
     queueOp(canvasId: string, op: CanvasOp) {
@@ -76,8 +149,12 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
             }
             case 'node_style': {
                 const d = op.data as { style: Record<string, unknown> };
-                // merge style fields so multiple style ops in one flush window combine
-                map.set(op.nodeId, { ...existing, style: { ...(existing.style ?? {}), ...d.style } });
+                // Merge style fields within the flush window so rapid style changes
+                // from the same client combine. Cross-client merging is done at DB level.
+                map.set(op.nodeId, {
+                    ...existing,
+                    styleOp: { ...(existing.styleOp ?? {}), ...d.style },
+                });
                 break;
             }
             case 'node_zindex': {
@@ -89,16 +166,16 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
     }
 
     async forceFlush(canvasId: string) {
-        await this.flushCanvas(canvasId);
+        await this.flushCanvas(canvasId, 0);
     }
 
     private async flushAll() {
         const ids = [...this.pendingWrites.keys()];
         if (!ids.length) return;
-        await Promise.allSettled(ids.map(id => this.flushCanvas(id)));
+        await Promise.allSettled(ids.map(id => this.flushCanvas(id, 0)));
     }
 
-    private async flushCanvas(canvasId: string) {
+    private async flushCanvas(canvasId: string, attempt: number) {
         const writes = this.pendingWrites.get(canvasId);
         if (!writes || writes.size === 0) return;
 
@@ -110,57 +187,80 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
             await Promise.all(nodes.map(n => this.applyNodeUpdate(canvasId, n)));
             this.logger.debug(`[Collab] Flushed ${nodes.length} ops for canvas ${canvasId}`);
         } catch (err) {
-            this.logger.error(`[Collab] Flush failed for ${canvasId}: ${err.message}`);
-            // Re-queue only nodes not already superseded by a newer op
-            const current = this.pendingWrites.get(canvasId) ?? new Map<string, PendingNodeState>();
-            nodes.forEach(n => { if (!current.has(n.clientId)) current.set(n.clientId, n); });
-            this.pendingWrites.set(canvasId, current);
+            this.logger.error(
+                `[Collab] Flush failed for ${canvasId} (attempt ${attempt + 1}): ${err.message}`,
+            );
+
+            if (attempt < MAX_FLUSH_RETRIES - 1) {
+                // Exponential backoff retry: 200ms, 400ms, 800ms
+                const delay = FLUSH_RETRY_BASE_MS * Math.pow(2, attempt);
+                setTimeout(() => {
+                    // Re-queue only nodes not superseded by a newer op in the meantime
+                    const current = this.pendingWrites.get(canvasId) ?? new Map<string, PendingNodeState>();
+                    nodes.forEach(n => { if (!current.has(n.clientId)) current.set(n.clientId, n); });
+                    this.pendingWrites.set(canvasId, current);
+                    void this.flushCanvas(canvasId, attempt + 1);
+                }, delay);
+            } else {
+                // All retries exhausted — notify the canvas room so the frontend
+                // can trigger a full HTTP sync as fallback
+                this.logger.error(
+                    `[Collab] All retries exhausted for canvas ${canvasId}. Emitting sync_error.`,
+                );
+                this.onSyncError?.({
+                    canvasId,
+                    affectedNodeIds: nodes.map(n => n.clientId),
+                    message: 'Real-time sync failed after retries. Please re-save.',
+                });
+            }
         }
     }
 
     private async applyNodeUpdate(canvasId: string, state: PendingNodeState) {
-        const data: Record<string, unknown> = {};
-
-        if (state.zIndex !== undefined) data.zIndex = state.zIndex;
-        if (state.style !== undefined) data.style = state.style;
-
-        const hasPos = state.x !== undefined || state.y !== undefined;
-        const hasSize = state.width !== undefined || state.height !== undefined;
-
-        if (hasPos || hasSize) {
-            // node_move / node_resize always provide full { x, y, width, height }
-            // so we never need a DB read — just write directly
-            if (
-                state.x !== undefined &&
-                state.y !== undefined &&
-                state.width !== undefined &&
-                state.height !== undefined
-            ) {
-                const { x, y, width: w, height: h } = state;
-                data.x = x;
-                data.y = y;
-                data.width = w;
-                data.height = h;
-                data.bboxMinX = x;
-                data.bboxMinY = y;
-                data.bboxMaxX = x + w;
-                data.bboxMaxY = y + h;
-                data.tileIds = computeTileIds(x, y, x + w, y + h);
-            } else {
-                // Partial position (only x or only y — unusual but safe to skip spatial recompute)
-                if (state.x !== undefined) data.x = state.x;
-                if (state.y !== undefined) data.y = state.y;
-                if (state.width !== undefined) data.width = state.width;
-                if (state.height !== undefined) data.height = state.height;
-            }
+        // ── Style: use PostgreSQL JSONB merge operator (||) for atomic field-level merge.
+        // This means User A changing `fill` and User B changing `stroke` concurrently
+        // both survive — neither overwrites the other's field.
+        if (state.styleOp && Object.keys(state.styleOp).length > 0) {
+            await this.prisma.$executeRaw`
+                UPDATE "Node"
+                SET style = COALESCE(style, '{}'::jsonb) || ${JSON.stringify(state.styleOp)}::jsonb
+                WHERE "canvasId" = ${canvasId} AND "clientId" = ${state.clientId}
+            `;
         }
 
-        if (!Object.keys(data).length) return;
+        // ── Position / size / zIndex: build a flat update object
+        const data: Record<string, unknown> = {};
+        if (state.zIndex !== undefined) data.zIndex = state.zIndex;
 
-        await this.prisma.node.updateMany({
-            where: { canvasId, clientId: state.clientId },
-            data,
-        });
+        if (
+            state.x !== undefined &&
+            state.y !== undefined &&
+            state.width !== undefined &&
+            state.height !== undefined
+        ) {
+            const { x, y, width: w, height: h } = state;
+            data.x = x;
+            data.y = y;
+            data.width = w;
+            data.height = h;
+            data.bboxMinX = x;
+            data.bboxMinY = y;
+            data.bboxMaxX = x + w;
+            data.bboxMaxY = y + h;
+            data.tileIds = computeTileIds(x, y, x + w, y + h);
+        } else {
+            if (state.x !== undefined) data.x = state.x;
+            if (state.y !== undefined) data.y = state.y;
+            if (state.width !== undefined) data.width = state.width;
+            if (state.height !== undefined) data.height = state.height;
+        }
+
+        if (Object.keys(data).length > 0) {
+            await this.prisma.node.updateMany({
+                where: { canvasId, clientId: state.clientId },
+                data,
+            });
+        }
     }
 
     // ── Presence ──────────────────────────────────────────────────────────────
