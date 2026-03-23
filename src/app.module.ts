@@ -12,6 +12,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { GeminiModule } from './modules/ai-model-api/gemini/gemini.module';
 import { CanvasesModule } from './modules/canvases/canvases.module';
 import { PrePromptsModule } from './modules/pre-prompts/pre-prompts.module';
+import { AttachmentsModule } from './modules/attachments/attachments.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { PrePromptsModule } from './modules/pre-prompts/pre-prompts.module';
     GeminiModule,
     CanvasesModule,
     PrePromptsModule,
+    AttachmentsModule,
   ],
   controllers: [AppController],
   providers: [

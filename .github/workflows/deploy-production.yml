@@ -52,6 +52,10 @@ jobs:
             --no-use-http2 \
             --set-env-vars="NODE_ENV=production" \
             --set-env-vars="REDIS_HOST=${{ secrets.REDIS_HOST }}" \
+            --set-env-vars="AWS_S3_ACCESS_KEY=${{ secrets.AWS_S3_ACCESS_KEY }}" \
+            --set-env-vars="AWS_S3_SECRET_KEY=${{ secrets.AWS_S3_SECRET_KEY }}" \
+            --set-env-vars="AWS_S3_REGION=${{ secrets.AWS_S3_REGION }}" \
+            --set-env-vars="AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}" \
             --set-env-vars="REDIS_PORT=${{ secrets.REDIS_PORT }}" \
             --set-env-vars="REDIS_USERNAME=${{ secrets.REDIS_USERNAME }}" \
             --set-env-vars="REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}" \
