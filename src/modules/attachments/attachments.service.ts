@@ -21,7 +21,21 @@ export class AttachmentsService {
         private readonly s3: S3Service,
     ) {}
 
-    /** Adds presigned download + optional preview URL for images (inline, for &lt;img&gt;). */
+    /** Types that get a second presigned URL with inline disposition (preview in browser / iframe). */
+    private supportsInlinePreview(row: { type: AttachmentType; mimeType: string }): boolean {
+        if (row.type === 'IMAGE' || row.mimeType.startsWith('image/')) return true;
+        if (row.type === 'PDF' || row.mimeType === 'application/pdf') return true;
+        if (
+            row.type === 'CSV' ||
+            row.mimeType === 'text/csv' ||
+            row.mimeType === 'application/csv'
+        ) {
+            return true;
+        }
+        return false;
+    }
+
+    /** Presigned attachment + download URL; previewUrl when inline viewing makes sense (img, PDF iframe, CSV tab). */
     private async attachUrls<T extends { key: string; filename: string; mimeType: string; type: AttachmentType }>(
         row: T,
     ) {
@@ -34,7 +48,7 @@ export class AttachmentsService {
                 disposition: 'attachment',
             }),
         };
-        if (row.type === 'IMAGE' || row.mimeType.startsWith('image/')) {
+        if (this.supportsInlinePreview(row)) {
             return {
                 ...base,
                 previewUrl: await this.s3.getPresignedUrl({
