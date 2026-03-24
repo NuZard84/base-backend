@@ -81,6 +81,21 @@ export class S3Service {
         }
     }
 
+    /** Returns a presigned PUT URL so the browser can upload directly to S3. */
+    async getPresignedPutUrl(input: {
+        key: string;
+        contentType: string;
+        expiresIn?: number;
+    }): Promise<string> {
+        const { key, contentType, expiresIn = 300 } = input; // 5-minute window
+        const command = new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+            ContentType: contentType,
+        });
+        return getSignedUrl(this.client, command, { expiresIn });
+    }
+
     /** Returns a presigned GET URL (time-limited). Use inline for thumbnails/previews. */
     async getPresignedUrl(input: PresignedGetInput): Promise<string> {
         const { key, expiresIn = 3600, filename, disposition = 'attachment' } = input;
@@ -98,6 +113,19 @@ export class S3Service {
         });
 
         return getSignedUrl(this.client, command, { expiresIn });
+    }
+
+    /** Downloads a file from S3 and returns its content as a Buffer */
+    async getBuffer(key: string): Promise<Buffer> {
+        const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+        const response = await this.client.send(command);
+        const stream = response.Body as NodeJS.ReadableStream;
+        return new Promise<Buffer>((resolve, reject) => {
+            const chunks: Buffer[] = [];
+            stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+            stream.on('end', () => resolve(Buffer.concat(chunks)));
+            stream.on('error', reject);
+        });
     }
 
     /** Builds a stable S3 key for an attachment */

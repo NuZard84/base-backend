@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { AuthModule } from './auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { HealthModule } from './health/health.module';
@@ -13,10 +14,23 @@ import { GeminiModule } from './modules/ai-model-api/gemini/gemini.module';
 import { CanvasesModule } from './modules/canvases/canvases.module';
 import { PrePromptsModule } from './modules/pre-prompts/pre-prompts.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
+import { DocumentsModule } from './modules/documents/documents.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // BullMQ root: shared Redis connection for all queues
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          host: config.get<string>('REDIS_HOST', 'localhost'),
+          port: config.get<number>('REDIS_PORT', 6379),
+          password: config.get<string>('REDIS_PASSWORD') || undefined,
+          username: config.get<string>('REDIS_USERNAME') || undefined,
+        },
+      }),
+    }),
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
@@ -31,6 +45,7 @@ import { AttachmentsModule } from './modules/attachments/attachments.module';
     CanvasesModule,
     PrePromptsModule,
     AttachmentsModule,
+    DocumentsModule,
   ],
   controllers: [AppController],
   providers: [

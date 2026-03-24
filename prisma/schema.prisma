@@ -1,6 +1,7 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
 }
 
 generator client {
@@ -97,6 +98,7 @@ model User {
   usageLogs           UsageLog[]
   prePromptTemplates  PrePromptTemplate[]
   attachments         Attachment[]
+  documents           Document[]
 
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
@@ -354,4 +356,130 @@ model Attachment {
   @@index([entityType, entityId])
   @@index([type])
   @@map("attachments")
+}
+
+// --- DOCUMENTS (RAG Pipeline) ---
+
+enum DocumentType {
+  PDF
+  CSV
+  IMAGE
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  CHUNKING
+  EMBEDDING
+  COMPLETED
+  FAILED
+}
+
+enum ChunkingStrategy {
+  FIXED_SIZE
+  SEMANTIC
+  CSV_ROW
+  PAGE
+}
+
+model Document {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // File info
+  filename     String
+  s3Key        String         @unique
+  mimeType     String
+  sizeBytes    Int
+  documentType DocumentType
+  contentHash  String?        // SHA-256 for deduplication (set after upload)
+
+  // Processing state
+  status          DocumentStatus @default(PENDING)
+  errorMessage    String?
+  processingJobId String?        // BullMQ job ID for idempotency
+
+  // Extracted metadata (populated by workers)
+  pageCount     Int?
+  rowCount      Int?
+  extractedText String?        @db.Text  // First 50 KB preview
+  ocrConfidence Float?
+
+  // Relations
+  chunks   DocumentChunk[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([contentHash])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  // Chunk data
+  chunkIndex Int     // Order within document
+  content    String  @db.Text
+  tokenCount Int
+  charCount  Int
+
+  // Source location
+  pageNumber Int?    // For PDFs
+  rowRange   String? // For CSVs: "1-20"
+
+  // Chunking metadata
+  strategy ChunkingStrategy
+
+  // Embedding relation
+  embedding ChunkEmbedding?
+
+  createdAt DateTime @default(now())
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+  @@map("document_chunks")
+}
+
+model ChunkEmbedding {
+  id      String        @id @default(uuid())
+  chunkId String        @unique
+  chunk   DocumentChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  // pgvector column — HNSW allows max 2000 dims; we use MRL outputDimensionality 1536
+  embedding Unsupported("vector(1536)")
+  model     String       @default("gemini-embedding-001")
+
+  createdAt DateTime @default(now())
+
+  @@index([chunkId])
+  @@map("chunk_embeddings")
+}
+
+model RAGQuery {
+  id       String  @id @default(uuid())
+  userId   String
+  canvasId String? // Optional link to canvas context
+
+  query             String   @db.Text
+  retrievedChunkIds String[] // Chunk IDs used for context
+  contextText       String?  @db.Text  // Assembled context (for debugging)
+  response          String   @db.Text
+
+  provider         String   @default("gemini")
+  model            String   @default("gemini-2.0-flash-lite")
+  retrievalTimeMs  Int
+  generationTimeMs Int
+
+  documentIds String[]  // Documents queried (stored as plain array for query performance)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([canvasId])
+  @@map("rag_queries")
 }

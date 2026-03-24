@@ -6,6 +6,6 @@ import { S3Service } from './s3.service';
 @Module({
     controllers: [AttachmentsController],
     providers: [AttachmentsService, S3Service],
-    exports: [AttachmentsService],
+    exports: [AttachmentsService, S3Service],
 })
 export class AttachmentsModule {}

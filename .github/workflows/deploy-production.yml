@@ -67,6 +67,7 @@ jobs:
             --set-env-vars="GOOGLE_CALLBACK_URL=${{ secrets.GOOGLE_CALLBACK_URL }}" \
             --set-env-vars="FRONTEND_URL=${{ secrets.FRONTEND_URL }}" \
             --set-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
+            --set-env-vars="AI_DEFAULT_PROVIDER=${{ secrets.AI_DEFAULT_PROVIDER }}" \
             --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}"
 
       - name: Show service URL
