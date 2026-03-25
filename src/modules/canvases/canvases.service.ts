@@ -87,6 +87,7 @@ export class CanvasesService {
                 id: true,
                 name: true,
                 description: true,
+                userId: true,
                 nodeCount: true,
                 edgeCount: true,
                 boundsMinX: true,

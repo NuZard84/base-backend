@@ -386,6 +386,7 @@ model Document {
   id     String @id @default(uuid())
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  canvasId String?  // null = uploaded outside canvas context
 
   // File info
   filename     String
@@ -412,7 +413,7 @@ model Document {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId, status])
+  @@index([userId, canvasId, status])
   @@index([contentHash])
   @@map("documents")
 }

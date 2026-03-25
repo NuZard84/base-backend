@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { pathToFileURL } from 'url';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 // Point pdfjs to its own worker file so it can parse in a background thread
-pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve(
-  'pdfjs-dist/legacy/build/pdf.worker.mjs',
-);
+// Use pathToFileURL to convert filesystem path to ESM-compatible file:// URL
+pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(
+  require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+).href;
 
 export interface PdfResult {
   text: string;

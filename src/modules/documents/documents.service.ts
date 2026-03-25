@@ -52,6 +52,7 @@ export class DocumentsService {
     const document = await this.prisma.document.create({
       data: {
         userId,
+        canvasId: dto.canvasId ?? null,
         filename: dto.filename,
         s3Key,
         mimeType: dto.mimeType,
@@ -128,9 +129,17 @@ export class DocumentsService {
     };
   }
 
-  async findAll(userId: string, status?: DocumentStatus) {
-    const where: { userId: string; status?: DocumentStatus } = { userId };
+  async findAll(userId: string, status?: DocumentStatus, canvasId?: string) {
+    const where: any = { userId };
     if (status) where.status = status;
+
+    if (canvasId) {
+      // Canvas scope: show global (null) docs + this canvas's own docs
+      where.OR = [{ canvasId: null }, { canvasId }];
+    } else {
+      // RagChat / global scope: show only null-canvasId docs
+      where.canvasId = null;
+    }
 
     const documents = await this.prisma.document.findMany({
       where,

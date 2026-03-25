@@ -68,9 +68,15 @@ export class DocumentsController {
     enum: DocumentStatus,
     description: 'Filter by processing status',
   })
+  @ApiQuery({
+    name: 'canvasId',
+    required: false,
+    type: 'string',
+    description: 'Filter by canvas ID',
+  })
   @ApiResponse({ status: 200, description: 'Array of document records.' })
-  findAll(@Req() req, @Query('status') status?: DocumentStatus) {
-    return this.documentsService.findAll(req.user.userId, status);
+  findAll(@Req() req, @Query('status') status?: DocumentStatus, @Query('canvasId') canvasId?: string) {
+    return this.documentsService.findAll(req.user.userId, status, canvasId);
   }
 
   @Get(':id')
