@@ -2,6 +2,7 @@ import { Controller, Post, Get, Body, Query, BadRequestException, Logger, UseGua
 import { GeminiService } from './gemini.service';
 import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { Throttle } from '@nestjs/throttler';
 
 import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto } from '../types';
 
@@ -60,6 +61,7 @@ export class GeminiController {
     }
 
     @Post('generate-image')
+    @Throttle({ default: { limit: 5, ttl: 60000 } })
     @ApiOperation({ summary: 'Generate images using Imagen 4 or Gemini native image models' })
     async generateImage(@Body() body: ImageGenRequestDto, @Request() req: any): Promise<ImageGenResponseDto> {
         if (!body.prompt?.trim()) {

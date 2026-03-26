@@ -1,4 +1,4 @@
-import { IsArray, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export const queryType = {
     VID_SUMMARIZE: 'vid_summarize'
@@ -34,11 +34,20 @@ export class AiResponse {
     sources?: { title: string; url: string }[];
 }
 
+export const VALID_IMAGE_GEN_MODELS = [
+    'imagen-4.0-generate-001',
+    'imagen-4.0-ultra-generate-001',
+    'imagen-4.0-fast-generate-001',
+    'gemini-3.1-flash-image-preview',
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image',
+] as const;
+
 export class ImageGenRequestDto {
     @IsString()
     prompt: string;
 
-    @IsString()
+    @IsIn(VALID_IMAGE_GEN_MODELS, { message: `model must be one of: ${VALID_IMAGE_GEN_MODELS.join(', ')}` })
     model: string;
 
     @IsOptional()

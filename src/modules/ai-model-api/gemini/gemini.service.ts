@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
-import { AiRequestData, AiRequestConfig, AiResponse, queryType, ImageGenRequestDto, ImageGenResponseDto, GeneratedImageItem } from '../types';
+import { AiRequestData, AiRequestConfig, AiResponse, queryType, ImageGenRequestDto, ImageGenResponseDto, GeneratedImageItem, VALID_IMAGE_GEN_MODELS } from '../types';
 import { S3Service } from '../../attachments/s3.service';
 import { PrismaService } from 'prisma/prisma.service';
 
@@ -149,11 +149,7 @@ Follow this layout for all non-trivial queries:
         }
     }
 
-    private readonly IMAGEN_MODELS = [
-        'imagen-4.0-generate-001',
-        'imagen-4.0-ultra-generate-001',
-        'imagen-4.0-fast-generate-001',
-    ];
+    private readonly IMAGEN_MODELS: readonly string[] = VALID_IMAGE_GEN_MODELS.filter(m => m.startsWith('imagen'));
 
     async generateImage(dto: ImageGenRequestDto & { userId?: string }): Promise<ImageGenResponseDto> {
         if (!this.genAI) {
@@ -162,12 +158,20 @@ Follow this layout for all non-trivial queries:
 
         this.logger.log(`generateImage: model=${dto.model}, numberOfImages=${dto.numberOfImages ?? 1}`);
 
+        const GENERATION_TIMEOUT_MS = 120_000;
+        const withTimeout = <T>(promise: Promise<T>): Promise<T> => {
+            const timeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Image generation timed out after 120 seconds')), GENERATION_TIMEOUT_MS)
+            );
+            return Promise.race([promise, timeout]);
+        };
+
         try {
             let rawImages: { base64: string; mimeType: string }[] = [];
 
             if (this.IMAGEN_MODELS.includes(dto.model)) {
                 // ── Branch A: Imagen 4 (generateImages API) ──
-                const response = await (this.genAI.models as any).generateImages({
+                const response: any = await withTimeout((this.genAI.models as any).generateImages({
                     model: dto.model,
                     prompt: dto.prompt,
                     config: {
@@ -176,7 +180,7 @@ Follow this layout for all non-trivial queries:
                         personGeneration: 'allow_adult',
                         ...(dto.imageSize ? { outputOptions: { imageSize: dto.imageSize } } : {}),
                     },
-                });
+                }));
 
                 // imageBytes is already a base64 string in @google/genai SDK
                 rawImages = (response.generatedImages ?? []).map((img: any) => ({
@@ -198,11 +202,11 @@ Follow this layout for all non-trivial queries:
                     parts.push({ inlineData: { mimeType, data } });
                 }
 
-                const response = await this.genAI.models.generateContent({
+                const response = await withTimeout(this.genAI.models.generateContent({
                     model: dto.model,
                     contents: [{ role: 'user', parts }],
                     config: { responseModalities: ['TEXT', 'IMAGE'] } as any,
-                });
+                }));
 
                 for (const part of response.candidates?.[0]?.content?.parts ?? []) {
                     if ((part as any).inlineData?.data) {
@@ -219,29 +223,43 @@ Follow this layout for all non-trivial queries:
             }
 
             // ── Upload all generated images to S3 ──
-            const userId = dto.userId ?? 'anonymous';
-            const canvasId = dto.canvasId ?? 'unknown';
-            const images: GeneratedImageItem[] = await Promise.all(
+            const userId = dto.userId;
+            if (!userId) {
+                return { success: false, images: [], error: 'User identity could not be resolved.' };
+            }
+            const canvasId = dto.canvasId;
+            if (!canvasId) {
+                return { success: false, images: [], error: 'canvasId is required to store generated images.' };
+            }
+
+            const results = await Promise.allSettled(
                 rawImages.map(async ({ base64, mimeType }) => {
                     const ext = mimeType.split('/')[1] ?? 'png';
-                    const random = Math.random().toString(36).slice(2, 8);
-                    const key = `generated/${userId}/${canvasId}/${Date.now()}-${random}.${ext}`;
+                    const uuid = crypto.randomUUID();
+                    const key = `generated/${userId}/${canvasId}/${uuid}.${ext}`;
                     const buffer = Buffer.from(base64, 'base64');
 
                     await this.s3.upload({ key, body: buffer, contentType: mimeType, metadata: { userId, canvasId } });
 
-                    const attachment = await this.prisma.attachment.create({
-                        data: {
-                            userId,
-                            key,
-                            filename: `generated-${Date.now()}.${ext}`,
-                            mimeType,
-                            sizeBytes: buffer.length,
-                            type: 'IMAGE',
-                            entityType: 'generated_image',
-                            entityId: canvasId,
-                        },
-                    });
+                    let attachment: { id: string };
+                    try {
+                        attachment = await this.prisma.attachment.create({
+                            data: {
+                                userId,
+                                key,
+                                filename: `generated-${uuid}.${ext}`,
+                                mimeType,
+                                sizeBytes: buffer.length,
+                                type: 'IMAGE',
+                                entityType: 'generated_image',
+                                entityId: canvasId,
+                            },
+                        });
+                    } catch (dbErr) {
+                        // Clean up the S3 object so it doesn't orphan
+                        await this.s3.delete(key).catch(() => { /* best-effort */ });
+                        throw dbErr;
+                    }
 
                     // 7-day presigned URL
                     const url = await this.s3.getPresignedUrl({ key, expiresIn: 60 * 60 * 24 * 7, disposition: 'inline' });
@@ -249,6 +267,31 @@ Follow this layout for all non-trivial queries:
                     return { url, id: attachment.id, key };
                 }),
             );
+
+            const images: GeneratedImageItem[] = [];
+            const errors: string[] = [];
+            for (const result of results) {
+                if (result.status === 'fulfilled') {
+                    images.push(result.value);
+                } else {
+                    this.logger.error(`Image upload failed: ${result.reason?.message}`, result.reason?.stack);
+                    errors.push(result.reason?.message ?? 'Upload failed');
+                }
+            }
+
+            if (!images.length) {
+                return { success: false, images: [], error: errors[0] ?? 'All image uploads failed.' };
+            }
+
+            // Fire-and-forget usage log — never block the response
+            this.prisma.usageLog.create({
+                data: {
+                    userId,
+                    resourceType: 'image_gen',
+                    quantity: images.length,
+                    metadata: { model: dto.model, canvasId, promptLength: dto.prompt.length },
+                },
+            }).catch(err => this.logger.warn(`Failed to write usage log: ${err.message}`));
 
             return { success: true, images };
 
