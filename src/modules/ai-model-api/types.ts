@@ -1,3 +1,5 @@
+import { IsArray, IsNumber, IsOptional, IsString } from 'class-validator';
+
 export const queryType = {
     VID_SUMMARIZE: 'vid_summarize'
 }
@@ -30,4 +32,47 @@ export class AiResponse {
     text: string;
     /** Populated only when isSearch is true — grounded web sources */
     sources?: { title: string; url: string }[];
+}
+
+export class ImageGenRequestDto {
+    @IsString()
+    prompt: string;
+
+    @IsString()
+    model: string;
+
+    @IsOptional()
+    @IsString()
+    canvasId?: string;             // for S3 path + DB tracking
+
+    // Imagen 4 only
+    @IsOptional()
+    @IsNumber()
+    numberOfImages?: number;       // 1–4
+
+    @IsOptional()
+    @IsString()
+    aspectRatio?: string;          // '1:1' | '3:4' | '4:3' | '9:16' | '16:9' | ...
+
+    @IsOptional()
+    @IsString()
+    imageSize?: string;            // '1K' | '2K'
+
+    // Gemini native models only
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    referenceImages?: string[];    // base64 data URLs (data:image/...;base64,...)
+}
+
+export interface GeneratedImageItem {
+    url: string;    // presigned S3 URL (7-day expiry)
+    id: string;     // Attachment DB id — use for delete
+    key: string;    // S3 key — stored for URL refresh
+}
+
+export class ImageGenResponseDto {
+    success: boolean;
+    images: GeneratedImageItem[];
+    error?: string;
 }

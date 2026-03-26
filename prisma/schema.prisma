@@ -34,6 +34,7 @@ enum NodeRole {
 enum NodeType {
   QUESTION
   IMAGE
+  IMAGE_GEN
   VIDEO
   PDF
   CODE

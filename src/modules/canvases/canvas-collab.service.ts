@@ -25,6 +25,8 @@ interface PendingNodeState {
     zIndex?: number;
     /** style ops are accumulated separately so they can be merged at DB level */
     styleOp?: Record<string, unknown>;
+    /** node_data ops — merged so rapid updates combine within flush window */
+    contentOp?: Record<string, unknown>;
 }
 
 export interface UserPresence {
@@ -162,6 +164,14 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
                 map.set(op.nodeId, { ...existing, zIndex: d.zIndex });
                 break;
             }
+            case 'node_data': {
+                // Merge content fields so rapid updates combine within the flush window
+                map.set(op.nodeId, {
+                    ...existing,
+                    contentOp: { ...(existing.contentOp ?? {}), ...op.data },
+                });
+                break;
+            }
         }
     }
 
@@ -222,8 +232,17 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
         // both survive — neither overwrites the other's field.
         if (state.styleOp && Object.keys(state.styleOp).length > 0) {
             await this.prisma.$executeRaw`
-                UPDATE "Node"
+                UPDATE "nodes"
                 SET style = COALESCE(style, '{}'::jsonb) || ${JSON.stringify(state.styleOp)}::jsonb
+                WHERE "canvasId" = ${canvasId} AND "clientId" = ${state.clientId}
+            `;
+        }
+
+        // ── Content (node_data): merge changed fields into the content JSONB column
+        if (state.contentOp && Object.keys(state.contentOp).length > 0) {
+            await this.prisma.$executeRaw`
+                UPDATE "nodes"
+                SET content = COALESCE(content, '{}'::jsonb) || ${JSON.stringify(state.contentOp)}::jsonb
                 WHERE "canvasId" = ${canvasId} AND "clientId" = ${state.clientId}
             `;
         }

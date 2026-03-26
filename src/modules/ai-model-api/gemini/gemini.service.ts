@@ -1,7 +1,9 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
-import { AiRequestData, AiRequestConfig, AiResponse, queryType } from '../types';
+import { AiRequestData, AiRequestConfig, AiResponse, queryType, ImageGenRequestDto, ImageGenResponseDto, GeneratedImageItem } from '../types';
+import { S3Service } from '../../attachments/s3.service';
+import { PrismaService } from 'prisma/prisma.service';
 
 export interface GroundingSource {
     title: string;
@@ -44,7 +46,11 @@ Follow this layout for all non-trivial queries:
 - Readablity: MOST IMPORTANTLY, the response must be ease to eye its should not feel user that the response is mess due to bad formatting and structure and mostly the spacing.
 `;
 
-    constructor(private configService: ConfigService) {
+    constructor(
+        private configService: ConfigService,
+        private readonly s3: S3Service,
+        private readonly prisma: PrismaService,
+    ) {
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
         if (apiKey) {
             this.genAI = new GoogleGenAI({ apiKey });
@@ -140,6 +146,115 @@ Follow this layout for all non-trivial queries:
         } catch (error) {
             this.logger.error(`Error generating content: ${error.message}`, error.stack);
             throw error;
+        }
+    }
+
+    private readonly IMAGEN_MODELS = [
+        'imagen-4.0-generate-001',
+        'imagen-4.0-ultra-generate-001',
+        'imagen-4.0-fast-generate-001',
+    ];
+
+    async generateImage(dto: ImageGenRequestDto & { userId?: string }): Promise<ImageGenResponseDto> {
+        if (!this.genAI) {
+            return { success: false, images: [], error: 'AI Service not configured. Please set GEMINI_API_KEY.' };
+        }
+
+        this.logger.log(`generateImage: model=${dto.model}, numberOfImages=${dto.numberOfImages ?? 1}`);
+
+        try {
+            let rawImages: { base64: string; mimeType: string }[] = [];
+
+            if (this.IMAGEN_MODELS.includes(dto.model)) {
+                // ── Branch A: Imagen 4 (generateImages API) ──
+                const response = await (this.genAI.models as any).generateImages({
+                    model: dto.model,
+                    prompt: dto.prompt,
+                    config: {
+                        numberOfImages: dto.numberOfImages ?? 1,
+                        aspectRatio: dto.aspectRatio ?? '1:1',
+                        personGeneration: 'allow_adult',
+                        ...(dto.imageSize ? { outputOptions: { imageSize: dto.imageSize } } : {}),
+                    },
+                });
+
+                // imageBytes is already a base64 string in @google/genai SDK
+                rawImages = (response.generatedImages ?? []).map((img: any) => ({
+                    base64: img.image?.imageBytes as string,
+                    mimeType: 'image/png',
+                }));
+
+                if (!rawImages.length) {
+                    return { success: false, images: [], error: 'No images generated. The prompt may have been blocked by safety filters.' };
+                }
+
+            } else {
+                // ── Branch B: Gemini native image gen (generateContent + responseModalities) ──
+                const parts: any[] = [{ text: dto.prompt }];
+
+                for (const dataUrl of dto.referenceImages ?? []) {
+                    const [header, data] = dataUrl.split(',');
+                    const mimeType = header.match(/:(.*?);/)?.[1] ?? 'image/jpeg';
+                    parts.push({ inlineData: { mimeType, data } });
+                }
+
+                const response = await this.genAI.models.generateContent({
+                    model: dto.model,
+                    contents: [{ role: 'user', parts }],
+                    config: { responseModalities: ['TEXT', 'IMAGE'] } as any,
+                });
+
+                for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+                    if ((part as any).inlineData?.data) {
+                        rawImages.push({
+                            base64: (part as any).inlineData.data,
+                            mimeType: (part as any).inlineData.mimeType ?? 'image/png',
+                        });
+                    }
+                }
+
+                if (!rawImages.length) {
+                    return { success: false, images: [], error: 'No image generated. Try rephrasing your prompt.' };
+                }
+            }
+
+            // ── Upload all generated images to S3 ──
+            const userId = dto.userId ?? 'anonymous';
+            const canvasId = dto.canvasId ?? 'unknown';
+            const images: GeneratedImageItem[] = await Promise.all(
+                rawImages.map(async ({ base64, mimeType }) => {
+                    const ext = mimeType.split('/')[1] ?? 'png';
+                    const random = Math.random().toString(36).slice(2, 8);
+                    const key = `generated/${userId}/${canvasId}/${Date.now()}-${random}.${ext}`;
+                    const buffer = Buffer.from(base64, 'base64');
+
+                    await this.s3.upload({ key, body: buffer, contentType: mimeType, metadata: { userId, canvasId } });
+
+                    const attachment = await this.prisma.attachment.create({
+                        data: {
+                            userId,
+                            key,
+                            filename: `generated-${Date.now()}.${ext}`,
+                            mimeType,
+                            sizeBytes: buffer.length,
+                            type: 'IMAGE',
+                            entityType: 'generated_image',
+                            entityId: canvasId,
+                        },
+                    });
+
+                    // 7-day presigned URL
+                    const url = await this.s3.getPresignedUrl({ key, expiresIn: 60 * 60 * 24 * 7, disposition: 'inline' });
+
+                    return { url, id: attachment.id, key };
+                }),
+            );
+
+            return { success: true, images };
+
+        } catch (error) {
+            this.logger.error(`generateImage error: ${error.message}`, error.stack);
+            return { success: false, images: [], error: error.message ?? 'Image generation failed. Please try again.' };
         }
     }
 

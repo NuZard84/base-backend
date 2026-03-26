@@ -1,9 +1,9 @@
-import { Controller, Post, Get, Body, Query, BadRequestException, Logger, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, BadRequestException, Logger, UseGuards, Request } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
-import { AiRequestData, AiRequestConfig } from '../types';
+import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto } from '../types';
 
 @ApiTags('AI Gemini')
 @ApiBearerAuth('bearer')
@@ -57,6 +57,15 @@ export class GeminiController {
     async generate(@Body() body: { data: AiRequestData; config?: AiRequestConfig }) {
 
         return this.geminiService.generateContent(body.data, body.config);
+    }
+
+    @Post('generate-image')
+    @ApiOperation({ summary: 'Generate images using Imagen 4 or Gemini native image models' })
+    async generateImage(@Body() body: ImageGenRequestDto, @Request() req: any): Promise<ImageGenResponseDto> {
+        if (!body.prompt?.trim()) {
+            throw new BadRequestException('prompt must not be empty');
+        }
+        return this.geminiService.generateImage({ ...body, userId: req.user?.userId });
     }
 
     @Get('search')

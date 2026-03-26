@@ -9,6 +9,7 @@ const NODE_TYPE_MAP: Record<string, NodeType> = {
     ResponseNode: NodeType.RESPONSE,
     LoadingNode: NodeType.RESPONSE,
     ImageNode: NodeType.IMAGE,
+    ImageGenNode: NodeType.IMAGE_GEN,
     CommentNode: NodeType.COMMENT,
     NotesNode: NodeType.NOTES,
     YoutubeNode: NodeType.EMBED,

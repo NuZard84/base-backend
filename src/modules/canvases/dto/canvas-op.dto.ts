@@ -2,7 +2,12 @@ export type CanvasOpType =
     | 'node_move'     // data: { x, y, width, height }   ← include width/height to avoid DB read on flush
     | 'node_resize'   // data: { x, y, width, height }
     | 'node_style'    // data: { style: Record<string, unknown> }
-    | 'node_zindex';  // data: { zIndex: number }
+    | 'node_zindex'   // data: { zIndex: number }
+    | 'node_data'     // data: Record<string, unknown> — partial content update
+    | 'node_add'      // data: Node (full node for peer broadcast)
+    | 'node_delete'   // data: {}
+    | 'edge_add'      // data: Edge
+    | 'edge_delete';  // data: {}
 
 export interface NodeMoveData    { x: number; y: number; width: number; height: number }
 export interface NodeResizeData  { x: number; y: number; width: number; height: number }
@@ -15,7 +20,7 @@ export interface CanvasOp {
     type: CanvasOpType;
     /** clientId of the node */
     nodeId: string;
-    data: NodeMoveData | NodeResizeData | NodeStyleData | NodeZIndexData;
+    data: NodeMoveData | NodeResizeData | NodeStyleData | NodeZIndexData | Record<string, unknown>;
 }
 
 // ── Op log entry stored in Redis ───────────────────────────────────────────
