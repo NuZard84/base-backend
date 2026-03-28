@@ -3,13 +3,17 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { PlanService } from '../../common/plans/plan.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('User')
 @ApiBearerAuth()
 @Controller('user')
 export class UserController {
-  constructor(private userService: UserService) { }
+  constructor(
+    private userService: UserService,
+    private planService: PlanService,
+  ) { }
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
@@ -38,6 +42,33 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'User account deleted successfully' })
   deleteAccount(@Req() req) {
     return this.userService.deleteAccount(req.user.userId);
+  }
+
+  // ─── Plan Endpoints ─────────────────────────────────────────────────────────
+
+  @Get('plans')
+  @ApiOperation({ summary: 'Get all visible plan definitions (public)' })
+  @ApiResponse({ status: 200, description: 'Returns all visible plan tiers with limits and features' })
+  getPlans() {
+    return this.planService.getVisiblePlans();
+  }
+
+  @Get('me/plan')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get current user plan details with usage' })
+  @ApiResponse({ status: 200, description: 'Returns effective plan, trial info, and usage summary' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  getMyPlan(@Req() req) {
+    return this.planService.getUserPlanDetails(req.user.userId);
+  }
+
+  @Get('me/usage')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get current user usage summary' })
+  @ApiResponse({ status: 200, description: 'Returns usage counts for all tracked resources' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  getMyUsage(@Req() req) {
+    return this.planService.getUsageSummary(req.user.userId);
   }
 }
 

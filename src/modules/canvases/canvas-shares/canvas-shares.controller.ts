@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
+import { PlanGuard } from '../../../common/plans/plan.guard';
+import { RequireFeature, CheckLimit } from '../../../common/plans/plan.decorator';
 import { CanvasSharesService } from './canvas-shares.service';
 import { InviteCanvasDto } from './dto/invite-canvas.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
@@ -23,6 +25,9 @@ export class CanvasSharesController {
     constructor(private readonly canvasSharesService: CanvasSharesService) {}
 
     @Post('invite')
+    @UseGuards(PlanGuard)
+    @RequireFeature('collaboration')
+    @CheckLimit('collaborators')
     @ApiOperation({ summary: 'Invite a user to collaborate on the canvas' })
     @ApiResponse({ status: 201, description: 'Invite sent or share created.' })
     invite(@Req() req, @Param('id') canvasId: string, @Body() dto: InviteCanvasDto) {

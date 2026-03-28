@@ -68,7 +68,10 @@ jobs:
             --set-env-vars="FRONTEND_URL=${{ secrets.FRONTEND_URL }}" \
             --set-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
             --set-env-vars="AI_DEFAULT_PROVIDER=${{ secrets.AI_DEFAULT_PROVIDER }}" \
-            --set-env-vars="DATABASE_URL=${{ secrets.DATABASE_URL }}"
+            --set-env-vars="ADMIN_PIN=${{ secrets.ADMIN_PIN }}" \
+            --set-env-vars="ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}" \
+            --set-env-vars="DATABASE_URL_DEV=${{ secrets.DATABASE_URL_DEV }}" \
+            --set-env-vars="DATABASE_URL_PROD=${{ secrets.DATABASE_URL_PROD }}"
 
       - name: Show service URL
         run: |

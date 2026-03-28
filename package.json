@@ -23,7 +23,8 @@
     "docker:build:gcp": "docker build -t gcr.io/$PROJECT_ID/base-backend:latest .",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "prisma:seed": "ts-node prisma/seed.ts"
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:push": "prisma db push && prisma db execute --file=prisma/vector-indexes.sql --schema=prisma/schema.prisma"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

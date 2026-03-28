@@ -26,6 +26,12 @@ export class AuthService {
       let user = await this.prisma.user.findUnique({ where: { email } });
 
       if (!user) {
+        // Read trial duration from admin-controlled AppConfig (fallback: 14 days)
+        const configRow = await this.prisma.appConfig.findUnique({
+          where: { key: 'default_trial_days' },
+        });
+        const trialDays = configRow ? parseInt(configRow.value, 10) : 14;
+
         user = await this.prisma.user.create({
           data: {
             email,
@@ -33,9 +39,11 @@ export class AuthService {
             image: profile.photos?.[0]?.value || null,
             googleId: profile.id,
             lastLoginAt: new Date(),
+            trialEndsAt: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
+            trialTier: 'PRO',
           },
         });
-        this.logger.log(`New user created: ${email}`);
+        this.logger.log(`New user created with ${trialDays}-day PRO trial: ${email}`);
       } else {
         // Update last login and potentially refresh profile picture
         user = await this.prisma.user.update({

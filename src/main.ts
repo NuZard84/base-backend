@@ -6,6 +6,14 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { SocketIoAdapter } from './adapters/socket-io.adapter';
 import { json, urlencoded } from 'express';
 
+// Set DATABASE_URL based on NODE_ENV (using DATABASE_URL_DEV or DATABASE_URL_PROD)
+const nodeEnv = process.env.NODE_ENV || 'development';
+if (nodeEnv === 'production') {
+  process.env.DATABASE_URL = process.env.DATABASE_URL_PROD;
+} else {
+  process.env.DATABASE_URL = process.env.DATABASE_URL_DEV;
+}
+
 const requiredEnvVars = [
   'JWT_SECRET',
   'EXPIRE_ACCESS_TOKEN',

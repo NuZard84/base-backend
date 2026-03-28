@@ -18,6 +18,7 @@ import type { Prisma } from '@prisma/client';
 import { CanvasSharesService } from './canvas-shares/canvas-shares.service';
 import { CanvasesGateway } from './canvases.gateway';
 import { prepareNodeData } from './canvas-utils';
+import { PlanService } from '../../common/plans/plan.service';
 
 function hasDeltaPayload(dto: SyncCanvasDto): boolean {
     return (
@@ -40,6 +41,7 @@ export class CanvasesService {
         private prisma: PrismaService,
         private canvasSharesService: CanvasSharesService,
         private canvasesGateway: CanvasesGateway,
+        private planService: PlanService,
     ) {}
 
     private generateRandomString(length: number): string {
@@ -211,6 +213,13 @@ export class CanvasesService {
      */
     async sync(userId: string, canvasId: string, dto: SyncCanvasDto) {
         await this.canvasSharesService.ensureCanvasAccess(userId, canvasId, CanvasRole.EDITOR);
+
+        // Check node-per-canvas limit when adding new nodes
+        const hasNewNodes =
+            (dto.nodesUpdated?.length ?? 0) > 0 || (dto.nodes?.length ?? 0) > 0;
+        if (hasNewNodes) {
+            await this.planService.checkLimit(userId, 'nodes_per_canvas', { canvasId });
+        }
 
         let result;
         if (isFullSync(dto)) {

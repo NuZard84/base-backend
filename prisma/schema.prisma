@@ -92,6 +92,10 @@ model User {
   stripeId       String?            @unique
   subscriptionId String?            @unique
 
+  // Free trial: when set, user gets trialTier features until trialEndsAt
+  trialEndsAt DateTime?
+  trialTier   PlanTier?
+
   refreshToken String?
 
   canvases            Canvas[]
@@ -460,6 +464,43 @@ model ChunkEmbedding {
 
   @@index([chunkId])
   @@map("chunk_embeddings")
+}
+
+// --- ADMIN: Plan overrides (admin panel can override static plan-config.ts) ---
+
+// Admin-controlled app-wide settings (key/value store)
+model AppConfig {
+  key       String   @id           // e.g. 'default_trial_days'
+  value     String                 // stored as string, parsed by consumer
+  updatedAt DateTime @updatedAt
+
+  @@map("app_config")
+}
+
+model PlanFeatureOverride {
+  id        String   @id @default(uuid())
+  tier      PlanTier
+  feature   String   // matches FeatureKey (e.g. 'collaboration', 'imageGeneration')
+  enabled   Boolean
+  updatedAt DateTime @updatedAt
+  updatedBy String?  // admin note
+
+  @@unique([tier, feature])
+  @@index([tier])
+  @@map("plan_feature_overrides")
+}
+
+model PlanLimitOverride {
+  id        String   @id @default(uuid())
+  tier      PlanTier
+  limitKey  String   // matches limit field name (e.g. 'maxProjects', 'maxAiRequestsPerMonth')
+  value     Int      // -1 = unlimited
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@unique([tier, limitKey])
+  @@index([tier])
+  @@map("plan_limit_overrides")
 }
 
 model RAGQuery {

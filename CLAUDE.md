@@ -79,7 +79,9 @@ After any schema change in `prisma/schema.prisma`, run `npm run prisma:generate`
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string |
+| `NODE_ENV` | Environment mode: `development` or `production` |
+| `DATABASE_URL_DEV` | Development PostgreSQL connection string (used when `NODE_ENV=development`) |
+| `DATABASE_URL_PROD` | Production PostgreSQL connection string (used when `NODE_ENV=production`, set via CI/CD secrets) |
 | `JWT_SECRET` | JWT signing secret |
 | `EXPIRE_ACCESS_TOKEN` | Access token TTL in seconds |
 | `EXPIRE_REFRESH_TOKEN` | Refresh token TTL in seconds |
@@ -91,6 +93,8 @@ After any schema change in `prisma/schema.prisma`, run `npm run prisma:generate`
 | `REDIS_PASSWORD` | Redis auth password |
 | `FRONTEND_URL` | Comma-separated allowed CORS origins |
 | `GEMINI_API_KEY` | Google Gemini API key (optional; logs warning if absent) |
+
+**Note:** `DATABASE_URL` is automatically set at runtime from `DATABASE_URL_DEV` or `DATABASE_URL_PROD` based on `NODE_ENV`. Do not set `DATABASE_URL` directly.
 
 ### API Documentation
 

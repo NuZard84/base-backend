@@ -18,6 +18,10 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { PlanGuard } from '../../common/plans/plan.guard';
+import { RequireFeature, CheckLimit } from '../../common/plans/plan.decorator';
+import { PlanService } from '../../common/plans/plan.service';
+import { RESOURCE_TYPES } from '../../common/plans/plan-config';
 import { DocumentsService } from './documents.service';
 import { CreatePresignedUrlDto } from './dto/create-presigned-url.dto';
 import { ConfirmUploadDto } from './dto/confirm-upload.dto';
@@ -27,10 +31,15 @@ import { DocumentStatus } from '@prisma/client';
 @ApiBearerAuth()
 @Controller('documents')
 export class DocumentsController {
-  constructor(private readonly documentsService: DocumentsService) {}
+  constructor(
+    private readonly documentsService: DocumentsService,
+    private readonly planService: PlanService,
+  ) {}
 
   @Post('presigned-url')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PlanGuard)
+  @RequireFeature('ragDocumentUpload')
+  @CheckLimit('storage')
   @ApiOperation({
     summary: 'Request a presigned S3 upload URL',
     description:
@@ -55,8 +64,13 @@ export class DocumentsController {
   })
   @ApiResponse({ status: 200, description: 'Processing queued.' })
   @ApiResponse({ status: 400, description: 'File not found in S3 or already confirmed.' })
-  confirm(@Req() req, @Body() dto: ConfirmUploadDto) {
-    return this.documentsService.confirmUpload(req.user.userId, dto);
+  async confirm(@Req() req, @Body() dto: ConfirmUploadDto) {
+    const result = await this.documentsService.confirmUpload(req.user.userId, dto);
+    // Log document upload usage
+    await this.planService.logUsage(req.user.userId, RESOURCE_TYPES.DOCUMENT_UPLOAD, 1, {
+      documentId: dto.documentId,
+    });
+    return result;
   }
 
   @Get()

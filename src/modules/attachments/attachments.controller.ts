@@ -15,6 +15,10 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { AttachmentsService } from './attachments.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { PlanGuard } from '../../common/plans/plan.guard';
+import { CheckLimit } from '../../common/plans/plan.decorator';
+import { PlanService } from '../../common/plans/plan.service';
+import { RESOURCE_TYPES } from '../../common/plans/plan-config';
 import { UploadAttachmentDto } from './dto/upload-attachment.dto';
 import { QueryAttachmentsDto } from './dto/query-attachments.dto';
 import { MAX_FILE_SIZE_BYTES } from './attachments.constants';
@@ -25,10 +29,14 @@ const FILE_SIZE_MB = MAX_FILE_SIZE_BYTES / 1024 / 1024;
 @ApiBearerAuth()
 @Controller('attachments')
 export class AttachmentsController {
-    constructor(private readonly attachmentsService: AttachmentsService) {}
+    constructor(
+        private readonly attachmentsService: AttachmentsService,
+        private readonly planService: PlanService,
+    ) {}
 
     @Post('upload')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @CheckLimit('storage')
     @UseInterceptors(
         FileInterceptor('file', {
             limits: { fileSize: MAX_FILE_SIZE_BYTES },
@@ -56,12 +64,18 @@ export class AttachmentsController {
         @UploadedFile() file: Express.Multer.File,
         @Body() dto?: UploadAttachmentDto,
     ) {
-        return this.attachmentsService.upload(
+        const result = await this.attachmentsService.upload(
             req.user.userId,
             file,
             dto?.entityType,
             dto?.entityId,
         );
+        // Log file upload usage
+        await this.planService.logUsage(req.user.userId, RESOURCE_TYPES.FILE_UPLOAD, 1, {
+            filename: file.originalname,
+            sizeBytes: file.size,
+        });
+        return result;
     }
 
     @Get()

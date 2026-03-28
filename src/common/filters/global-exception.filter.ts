@@ -26,6 +26,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let message = 'Internal server error';
     let error = 'Internal Server Error';
 
+    // Extra fields from plan errors (code, limitType, current, limit, etc.)
+    let extraFields: Record<string, unknown> = {};
+
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
@@ -36,8 +39,14 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         typeof exceptionResponse === 'object' &&
         exceptionResponse !== null
       ) {
-        message = (exceptionResponse as any).message || exception.message;
-        error = (exceptionResponse as any).error || error;
+        const resp = exceptionResponse as Record<string, unknown>;
+        message = (resp.message as string) || exception.message;
+        error = (resp.error as string) || error;
+
+        // Pass through structured plan error fields so the frontend can display
+        // the correct upgrade popup (code, limitType, current, limit, resetAt, feature)
+        const { message: _m, error: _e, ...rest } = resp;
+        extraFields = rest;
       }
     } else if (exception instanceof Error) {
       message = exception.message;
@@ -56,6 +65,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       status === HttpStatus.INTERNAL_SERVER_ERROR
     ) {
       message = 'Internal server error';
+      extraFields = {};
     }
 
     response.status(status).json({
@@ -65,6 +75,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       method: request.method,
       error,
       message,
+      ...extraFields,
     });
   }
 }

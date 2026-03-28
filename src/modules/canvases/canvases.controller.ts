@@ -17,6 +17,8 @@ import { SyncCanvasDto } from './dto/sync-node.dto';
 import { ViewportQueryDto } from './dto/viewport-query.dto';
 import { CanvasesService } from './canvases.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { PlanGuard } from '../../common/plans/plan.guard';
+import { CheckLimit } from '../../common/plans/plan.decorator';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 
 @ApiTags('Canvases')
@@ -26,7 +28,8 @@ export class CanvasesController {
     constructor(private readonly canvasesService: CanvasesService) {}
 
     @Post()
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(JwtAuthGuard, PlanGuard)
+    @CheckLimit('projects')
     @ApiOperation({ summary: 'Create a new canvas' })
     @ApiResponse({ status: 201, description: 'The canvas has been successfully created.' })
     create(@Req() req, @Body() createDto: CreateCanvasDto) {
