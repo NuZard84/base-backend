@@ -81,9 +81,18 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         if (userId && canvasIds) {
             for (const canvasId of canvasIds) {
-                void this.collabService.removePresence(canvasId, userId);
                 void this.collabService.forceFlush(canvasId);
-                this.server.to(`canvas:${canvasId}`).emit('presence_left', { canvasId, userId });
+
+                // Only remove presence and announce departure if this was the user's
+                // last active socket in this canvas (multi-tab: other tabs stay present)
+                const roomName = `canvas:${canvasId}`;
+                const sockets = await this.server.in(roomName).fetchSockets();
+                const userStillPresent = sockets.some(s => s.data.userId === userId);
+
+                if (!userStillPresent) {
+                    void this.collabService.removePresence(canvasId, userId);
+                    this.server.to(roomName).emit('presence_left', { canvasId, userId });
+                }
             }
         }
         this.logger.log(`Disconnected: ${client.id}`);
@@ -178,10 +187,17 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         await client.leave(roomName);
         (client.data.canvasIds as Set<string>).delete(canvasId);
 
-        void this.collabService.removePresence(canvasId, userId);
         void this.collabService.forceFlush(canvasId);
 
-        this.server.to(roomName).emit('presence_left', { canvasId, userId });
+        // Only remove presence and notify peers if no other sockets for this user remain
+        const sockets = await this.server.in(roomName).fetchSockets();
+        const userStillPresent = sockets.some(s => s.data.userId === userId);
+
+        if (!userStillPresent) {
+            void this.collabService.removePresence(canvasId, userId);
+            this.server.to(roomName).emit('presence_left', { canvasId, userId });
+        }
+
         this.logger.log(`${client.id} left canvas:${canvasId}`);
     }
 

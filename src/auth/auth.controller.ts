@@ -1,5 +1,4 @@
 import {
-  Body,
   Controller,
   Get,
   Post,
@@ -8,66 +7,99 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { Throttle } from '@nestjs/throttler';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-
 import { GoogleAuthGuard } from './google/google-auth.guard';
+import type { Response, Request } from 'express';
+
+const COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function setRefreshCookie(res: Response, token: string) {
+  const isProduction = process.env.NODE_ENV === 'production';
+  res.cookie('refreshToken', token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: COOKIE_MAX_AGE_MS,
+    path: '/',
+  });
+}
 
 @ApiTags('Authentication')
 @Controller('api/auth')
 export class AuthController {
-  constructor(
-    private authService: AuthService,
-  ) { }
+  constructor(private authService: AuthService) {}
 
   @Get('google')
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Initiate Google OAuth login' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  googleLogin() { }
+  googleLogin() {}
 
   @Get('callback/google')
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Google OAuth callback handler' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  googleCallback(@Req() req, @Res() res) {
+  googleCallback(@Req() req: any, @Res() res: Response) {
     const { user, accessToken, refreshToken } = req.user;
 
-    // Redirect to frontend with tokens
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const redirectUrl = `${frontendUrl}/auth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}&user=${encodeURIComponent(JSON.stringify(user))}`;
 
-    return res.redirect(redirectUrl);
+    // Redirect to a Next.js API route that sets the httpOnly cookie on the
+    // frontend's origin, then continues to /auth/callback
+    const setSessionUrl =
+      `${frontendUrl}/api/auth/set-session` +
+      `?at=${encodeURIComponent(accessToken)}` +
+      `&rt=${encodeURIComponent(refreshToken)}` +
+      `&user=${encodeURIComponent(JSON.stringify(user))}`;
+
+    return res.redirect(setSessionUrl);
   }
 
   @Post('refresh')
-  @ApiOperation({ summary: 'Refresh access token using refresh token' })
-  @ApiResponse({ status: 200, description: 'Access token refreshed successfully' })
+  @ApiOperation({ summary: 'Refresh access token (reads refresh token from httpOnly cookie)' })
+  @ApiResponse({ status: 200, description: 'Access token refreshed' })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async refresh(@Body() body: RefreshTokenDto) {
-    try {
-      const tokens = await this.authService.refreshAccessToken(
-        body.refreshToken,
-      );
-      if (!tokens) {
-        throw new UnauthorizedException('Invalid refresh token');
-      }
-      return tokens;
-    } catch (error) {
-      throw new UnauthorizedException('Token refresh failed');
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    // Read from cookie (primary) or body (fallback for non-browser clients)
+    const refreshToken = (req.cookies as any)?.refreshToken ?? (req.body as any)?.refreshToken;
+
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is required');
     }
+
+    const tokens = await this.authService.refreshAccessToken(refreshToken);
+
+    setRefreshCookie(res, tokens.refreshToken);
+
+    return { accessToken: tokens.accessToken };
+  }
+
+  @Post('logout')
+  @ApiOperation({ summary: 'Revoke current session and clear refresh token cookie' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const refreshToken = (req.cookies as any)?.refreshToken;
+
+    if (refreshToken) {
+      await this.authService.logout(refreshToken);
+    }
+
+    res.clearCookie('refreshToken', { path: '/' });
+    return { success: true };
   }
 
   @Post('guest')
   @ApiOperation({ summary: 'Create a guest user and return tokens' })
-  @ApiResponse({ status: 201, description: 'Guest user created successfully' })
+  @ApiResponse({ status: 201, description: 'Guest user created' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async createGuest() {
-    return this.authService.createGuestUser();
+  async createGuest(@Res({ passthrough: true }) res: Response) {
+    const { user, accessToken, refreshToken } = await this.authService.createGuestUser();
+
+    setRefreshCookie(res, refreshToken);
+
+    return { user, accessToken };
   }
 }
-

@@ -1,32 +1,53 @@
-// src/auth/auth.service.ts
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, OnModuleInit } from '@nestjs/common';
+import { Queue } from 'bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 import { PrismaService } from 'prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { v4 as uuidv4 } from 'uuid';
 
+const SLIDING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const HARD_CAP_MS = 90 * 24 * 60 * 60 * 1000;       // 90 days
+
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-  ) { }
+    @InjectQueue('cleanup') private cleanupQueue: Queue,
+  ) {}
+
+  async onModuleInit() {
+    // Schedule cleanup job to run daily at 2 AM
+    await this.cleanupQueue.add(
+      'cleanup-revoked-sessions',
+      {},
+      {
+        repeat: {
+          pattern: '0 2 * * *', // Daily at 2 AM
+        },
+        removeOnComplete: {
+          age: 3600, // Keep completed job for 1 hour
+        },
+        removeOnFail: {
+          age: 86400, // Keep failed job for 1 day (for debugging)
+        },
+      },
+    );
+    this.logger.log('Scheduled cleanup job: Daily at 2 AM');
+  }
 
   async validateGoogleUser(profile: any) {
     try {
-      if (!profile.emails || !profile.emails[0] || !profile.emails[0].value) {
-        throw new UnauthorizedException(
-          'Invalid Google profile: missing email',
-        );
+      if (!profile.emails?.[0]?.value) {
+        throw new UnauthorizedException('Invalid Google profile: missing email');
       }
 
       const email = profile.emails[0].value;
-
       let user = await this.prisma.user.findUnique({ where: { email } });
 
       if (!user) {
-        // Read trial duration from admin-controlled AppConfig (fallback: 14 days)
         const configRow = await this.prisma.appConfig.findUnique({
           where: { key: 'default_trial_days' },
         });
@@ -45,7 +66,6 @@ export class AuthService {
         });
         this.logger.log(`New user created with ${trialDays}-day PRO trial: ${email}`);
       } else {
-        // Update last login and potentially refresh profile picture
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
@@ -55,26 +75,14 @@ export class AuthService {
         });
       }
 
-      const payload = {
-        sub: user.id,
-        email: user.email,
-      };
+      const accessToken = this.jwtService.sign(
+        { sub: user.id, email: user.email },
+        { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
+      );
 
-      const accessToken = this.jwtService.sign(payload, {
-        expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN),
-      });
-      const refreshToken = this.jwtService.sign(payload, {
-        expiresIn: Number(process.env.EXPIRE_REFRESH_TOKEN),
-      });
+      const refreshToken = await this.createSession(user.id);
 
-      // Store refresh token in database for security
-      user = await this.prisma.user.update({
-        where: { id: user.id },
-        data: { refreshToken },
-      });
-
-      this.logger.log(`User validated: ${email}`);
-
+      this.logger.log(`User authenticated: ${email}`);
       return { user, accessToken, refreshToken };
     } catch (error) {
       this.logger.error('Error validating Google user:', error);
@@ -83,40 +91,95 @@ export class AuthService {
   }
 
   async refreshAccessToken(refreshToken: string) {
-    try {
-      if (!refreshToken) {
-        throw new UnauthorizedException('Refresh token is required');
-      }
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is required');
+    }
 
-      const payload = this.jwtService.verify(refreshToken);
+    const session = await this.prisma.session.findUnique({
+      where: { token: refreshToken },
+      include: { user: true },
+    });
 
-      const user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
+    const now = new Date();
+
+    // Reuse detection: token exists in DB but already revoked — possible theft
+    if (session?.isRevoked) {
+      await this.prisma.session.updateMany({
+        where: { userId: session.userId, isRevoked: false },
+        data: { isRevoked: true },
       });
-
-      if (!user || user.refreshToken !== refreshToken) {
-        throw new UnauthorizedException('Invalid refresh token');
-      }
-
-      const newAccessToken = this.jwtService.sign(
-        { sub: user.id, email: user.email },
-        { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
+      this.logger.warn(
+        `Refresh token reuse detected for user ${session.userId} — all sessions revoked`,
       );
+      throw new UnauthorizedException('Refresh token reuse detected — please log in again');
+    }
 
-      this.logger.log(`Access token refreshed for user: ${user.email}`);
-      return { accessToken: newAccessToken };
-    } catch (error) {
-      this.logger.error('Error refreshing access token:', error);
-      if (error instanceof UnauthorizedException) {
-        throw error;
-      }
-      throw new UnauthorizedException('Token refresh failed');
+    if (!session) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (session.expiresAt < now) {
+      await this.prisma.session.update({
+        where: { id: session.id },
+        data: { isRevoked: true },
+      });
+      throw new UnauthorizedException('Session expired — please log in again');
+    }
+
+    if (session.absoluteExpiresAt < now) {
+      await this.prisma.session.update({
+        where: { id: session.id },
+        data: { isRevoked: true },
+      });
+      throw new UnauthorizedException('Session reached maximum lifetime — please log in again');
+    }
+
+    // Rotate: revoke old session, create new one
+    await this.prisma.session.update({
+      where: { id: session.id },
+      data: { isRevoked: true },
+    });
+
+    const newRefreshToken = uuidv4();
+    const slidingExpiry = new Date(now.getTime() + SLIDING_WINDOW_MS);
+    // Sliding window capped at absolute max
+    const newExpiry = new Date(
+      Math.min(slidingExpiry.getTime(), session.absoluteExpiresAt.getTime()),
+    );
+
+    await this.prisma.session.create({
+      data: {
+        userId: session.userId,
+        token: newRefreshToken,
+        expiresAt: newExpiry,
+        absoluteExpiresAt: session.absoluteExpiresAt,
+        lastUsedAt: now,
+      },
+    });
+
+    const newAccessToken = this.jwtService.sign(
+      { sub: session.user.id, email: session.user.email },
+      { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
+    );
+
+    this.logger.log(`Token rotated for user: ${session.user.email}`);
+    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+  }
+
+  async logout(refreshToken: string) {
+    if (!refreshToken) return;
+    try {
+      await this.prisma.session.updateMany({
+        where: { token: refreshToken, isRevoked: false },
+        data: { isRevoked: true },
+      });
+    } catch {
+      // Silent fail — logout should always succeed from the user's perspective
     }
   }
 
   async createGuestUser() {
     try {
-
       const uniqueId = uuidv4();
       const email = `guest_${uniqueId}@pixelpioneers.ai`;
 
@@ -130,29 +193,57 @@ export class AuthService {
         },
       });
 
-      const payload = {
-        sub: user.id,
-        email: user.email,
-      };
+      const accessToken = this.jwtService.sign(
+        { sub: user.id, email: user.email },
+        { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
+      );
 
-      const accessToken = this.jwtService.sign(payload, {
-        expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN),
-      });
-      const refreshToken = this.jwtService.sign(payload, {
-        expiresIn: Number(process.env.EXPIRE_REFRESH_TOKEN),
-      });
-
-      // Store refresh token
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { refreshToken },
-      });
+      const refreshToken = await this.createSession(user.id);
 
       this.logger.log(`Guest user created: ${email}`);
-
       return { user, accessToken, refreshToken };
     } catch (error) {
       this.logger.error('Error creating guest user:', error);
+      throw error;
+    }
+  }
+
+  private async createSession(userId: string): Promise<string> {
+    const token = uuidv4();
+    const now = new Date();
+
+    await this.prisma.session.create({
+      data: {
+        userId,
+        token,
+        expiresAt: new Date(now.getTime() + SLIDING_WINDOW_MS),
+        absoluteExpiresAt: new Date(now.getTime() + HARD_CAP_MS),
+      },
+    });
+
+    return token;
+  }
+
+  // Called by BullMQ processor daily at 2 AM
+  async cleanupRevokedSessions() {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    try {
+      const deleted = await this.prisma.session.deleteMany({
+        where: {
+          isRevoked: true,
+          createdAt: {
+            lt: sevenDaysAgo,
+          },
+        },
+      });
+
+      this.logger.log(
+        `Cleanup completed: Deleted ${deleted.count} revoked sessions older than 7 days`,
+      );
+      return { success: true, deletedCount: deleted.count };
+    } catch (error) {
+      this.logger.error('Error during revoked sessions cleanup:', error);
       throw error;
     }
   }

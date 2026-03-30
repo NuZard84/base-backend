@@ -6,20 +6,31 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
 import { RedisModule } from 'src/redis/redis.module';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import { CleanupProcessor } from './cleanup.processor';
 
 @Module({
   imports: [
     PassportModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET,
-      signOptions: {
-        expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN),
-      },
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get<string>('JWT_SECRET'),
+        signOptions: {
+          expiresIn: config.get<number>('EXPIRE_ACCESS_TOKEN'),
+        },
+      }),
+      inject: [ConfigService],
     }),
     RedisModule,
+    BullModule.registerQueue({
+      name: 'cleanup',
+    }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, GoogleStrategy, JwtStrategy],
+  providers: [AuthService, GoogleStrategy, JwtStrategy, CleanupProcessor],
 })
 export class AuthModule { }
 

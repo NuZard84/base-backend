@@ -5,6 +5,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { SocketIoAdapter } from './adapters/socket-io.adapter';
 import { json, urlencoded } from 'express';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const cookieParser = require('cookie-parser');
 
 // Set DATABASE_URL based on NODE_ENV (using DATABASE_URL_DEV or DATABASE_URL_PROD)
 const nodeEnv = process.env.NODE_ENV || 'development';
@@ -35,6 +37,7 @@ async function bootstrap() {
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ limit: '10mb', extended: true }));
 
+  app.use(cookieParser());
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useWebSocketAdapter(new SocketIoAdapter(app));
 

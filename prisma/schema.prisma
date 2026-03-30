@@ -96,8 +96,7 @@ model User {
   trialEndsAt DateTime?
   trialTier   PlanTier?
 
-  refreshToken String?
-
+  sessions            Session[]
   canvases            Canvas[]
   canvasShares        CanvasShare[]
   usageLogs           UsageLog[]
@@ -113,6 +112,25 @@ model User {
   @@index([googleId])
   @@index([plan])
   @@map("users")
+}
+
+model Session {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token String @unique // opaque UUID refresh token
+
+  expiresAt         DateTime // sliding window — reset on each rotation
+  absoluteExpiresAt DateTime // hard cap — never changes after creation
+
+  isRevoked  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
 }
 
 model Canvas {
