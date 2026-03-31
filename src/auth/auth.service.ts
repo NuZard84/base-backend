@@ -56,7 +56,9 @@ export class AuthService implements OnModuleInit {
         user = await this.prisma.user.create({
           data: {
             email,
-            name: profile.displayName || null,
+            // Prefer Google displayName; fall back to email prefix so name is
+            // never null for new users (avoids "Unknown" in peer collaboration).
+            name: profile.displayName || email.split('@')[0] || null,
             image: profile.photos?.[0]?.value || null,
             googleId: profile.id,
             lastLoginAt: new Date(),

@@ -83,9 +83,9 @@ export class CanvasSharesService {
         });
         if (!canvas) throw new NotFoundException('Canvas not found');
 
-        // Find invited user
+        // Find invited user — normalize email to avoid case-mismatch misses
         const invitedUser = await this.prisma.user.findUnique({
-            where: { email: dto.email },
+            where: { email: dto.email.toLowerCase().trim() },
             select: { id: true, email: true, name: true },
         });
 

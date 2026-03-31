@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
 import { PlanGuard } from '../../../common/plans/plan.guard';
 import { RequireFeature, CheckLimit } from '../../../common/plans/plan.decorator';
 import { CanvasSharesService } from './canvas-shares.service';
+import { CanvasesGateway } from '../canvases.gateway';
 import { InviteCanvasDto } from './dto/invite-canvas.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 
@@ -22,7 +23,10 @@ import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('canvases/:id/members')
 export class CanvasSharesController {
-    constructor(private readonly canvasSharesService: CanvasSharesService) {}
+    constructor(
+        private readonly canvasSharesService: CanvasSharesService,
+        private readonly canvasesGateway: CanvasesGateway,
+    ) {}
 
     @Post('invite')
     @UseGuards(PlanGuard)
@@ -61,16 +65,18 @@ export class CanvasSharesController {
     @Delete(':userId')
     @ApiOperation({ summary: 'Remove a collaborator from the canvas' })
     @ApiResponse({ status: 200, description: 'Member removed.' })
-    removeMember(
+    async removeMember(
         @Req() req,
         @Param('id') canvasId: string,
         @Param('userId') targetUserId: string,
     ) {
-        return this.canvasSharesService.removeMember(
+        const result = await this.canvasSharesService.removeMember(
             req.user.userId,
             canvasId,
             targetUserId,
         );
+        await this.canvasesGateway.notifyMemberRemoved(canvasId, targetUserId);
+        return result;
     }
 
     @Post('accept')

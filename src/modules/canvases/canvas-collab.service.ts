@@ -84,9 +84,12 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
     async nextSeq(canvasId: string): Promise<number> {
         try {
             return await this.redis.incr(`canvas:${canvasId}:seq`);
-        } catch {
-            // Redis unavailable — return 0 so the op still goes through,
-            // just without sequencing guarantees.
+        } catch (err) {
+            // Redis unavailable — op still goes through but clients cannot detect
+            // gaps or duplicates. Log a warning so this is visible under degradation.
+            this.logger.warn(
+                `[Collab] Redis unavailable for seq (canvas=${canvasId}), ordering guarantees lost: ${err.message}`,
+            );
             return 0;
         }
     }
@@ -298,7 +301,7 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
 
         const presence: UserPresence = {
             userId,
-            name: partial.name ?? existing?.name ?? 'Unknown',
+            name: partial.name ?? existing?.name ?? 'User',
             color: existing?.color ?? this.assignColor(userId),
             cursor: partial.cursor ?? existing?.cursor,
             selectedNodeIds: partial.selectedNodeIds ?? existing?.selectedNodeIds,

@@ -549,6 +549,9 @@ export class CanvasesService {
             throw new NotFoundException(`Canvas with ID ${id} not found`);
         }
 
+        // Notify peers BEFORE deletion so the room still exists to receive the event
+        this.canvasesGateway.broadcastCanvasDeleted(id, userId);
+
         return this.prisma.canvas.delete({
             where: { id },
         });

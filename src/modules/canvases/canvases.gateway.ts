@@ -135,12 +135,19 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         // Run user lookup, seq fetch, and presence set in parallel
         const [user, currentSeq] = await Promise.all([
-            this.prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
+            this.prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } }),
             this.collabService.getCurrentSeq(canvasId),
         ]);
 
+        // Prefer stored name; fall back to email prefix (e.g. "jane" from "jane@gmail.com")
+        // so peers never see the generic "Unknown" label when a user's display name is null.
+        const displayName =
+            user?.name ||
+            (user?.email ? user.email.split('@')[0] : null) ||
+            'User';
+
         const presence = await this.collabService.setPresence(canvasId, userId, {
-            name: user?.name ?? 'Unknown',
+            name: displayName,
         });
 
         // Send presence list to the joiner
@@ -221,6 +228,9 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         const { canvasId, op } = payload;
 
+        // Reject ops from sockets that never successfully joined this canvas room
+        if (!(client.data.canvasIds as Set<string>).has(canvasId)) return;
+
         // Assign server sequence number (Redis INCR, non-blocking on failure)
         const serverSeq = await this.collabService.nextSeq(canvasId);
 
@@ -290,6 +300,7 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
     ) {
         const userId = client.data.userId as string;
         if (!userId || !payload?.canvasId) return;
+        if (!(client.data.canvasIds as Set<string>).has(payload.canvasId)) return;
 
         client.broadcast.to(`canvas:${payload.canvasId}`).emit('cursor_updated', {
             canvasId: payload.canvasId,
@@ -309,6 +320,7 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
     ) {
         const userId = client.data.userId as string;
         if (!userId || !payload?.canvasId) return;
+        if (!(client.data.canvasIds as Set<string>).has(payload.canvasId)) return;
 
         client.broadcast.to(`canvas:${payload.canvasId}`).emit('selection_updated', {
             canvasId: payload.canvasId,
@@ -334,6 +346,34 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         await this.collabService.forceFlush(payload.canvasId);
         return { event: 'flushed', data: { canvasId: payload.canvasId } };
+    }
+
+    // ── Called by CanvasesService / CanvasSharesController ───────────────────
+
+    /** Notify every socket in the room that the canvas was deleted by its owner. */
+    broadcastCanvasDeleted(canvasId: string, deletedByUserId: string) {
+        this.server.to(`canvas:${canvasId}`).emit('canvas_deleted', {
+            canvasId,
+            deletedByUserId,
+            message: 'This canvas has been deleted by the owner.',
+        });
+    }
+
+    /**
+     * Notify only the removed user's sockets that they no longer have access.
+     * Other peers are NOT notified here — they'll see the member disappear
+     * naturally via presence_left when the removed user's socket disconnects.
+     */
+    async notifyMemberRemoved(canvasId: string, removedUserId: string) {
+        const sockets = await this.server.in(`canvas:${canvasId}`).fetchSockets();
+        for (const s of sockets) {
+            if (s.data.userId === removedUserId) {
+                s.emit('member_removed', {
+                    canvasId,
+                    message: 'You have been removed from this canvas.',
+                });
+            }
+        }
     }
 
     // ── Called by CanvasesService after HTTP sync ─────────────────────────────
