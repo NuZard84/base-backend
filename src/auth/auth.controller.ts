@@ -44,7 +44,18 @@ export class AuthController {
   googleCallback(@Req() req: any, @Res() res: Response) {
     const { user, accessToken, refreshToken } = req.user;
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    // Resolve the correct frontend to redirect to: use the origin encoded in
+    // OAuth state (set by GoogleAuthGuard.getAuthenticateOptions), validated
+    // against FRONTEND_URL to prevent open-redirect. Falls back to first entry.
+    const allowedOrigins = (process.env.FRONTEND_URL || '')
+      .split(',')
+      .map((u) => u.trim())
+      .filter(Boolean);
+    const stateOrigin = req.query?.state as string | undefined;
+    const frontendUrl =
+      stateOrigin && allowedOrigins.includes(stateOrigin)
+        ? stateOrigin
+        : allowedOrigins[0] || 'http://localhost:3000';
 
     // Redirect to a Next.js API route that sets the httpOnly cookie on the
     // frontend's origin, then continues to /auth/callback
