@@ -7,6 +7,7 @@ import {
   SummarizeOptions,
   SummarizeResult,
 } from './ai-provider.interface';
+import { normalizeTokenUsage } from '../../../common/ai/token-usage';
 
 @Injectable()
 export class GeminiSummarizeProvider implements ISummarizeProvider {
@@ -78,7 +79,8 @@ Response length: ${length}.${extra}`;
 
     const summary = response.text ?? '';
     this.logger.log(`Summarized "${content.filename}" via Gemini model=${model}`);
-    return { summary, provider: this.name, model };
+    const tokenUsage = normalizeTokenUsage('gemini', (response as any).usageMetadata) ?? undefined;
+    return { summary, provider: this.name, model, ...(tokenUsage ? { tokenUsage } : {}) };
   }
 
   private buildTextPrompt(content: ParsedFileContent): string {

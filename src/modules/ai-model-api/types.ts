@@ -32,6 +32,8 @@ export class AiResponse {
     text: string;
     /** Populated only when isSearch is true — grounded web sources */
     sources?: { title: string; url: string }[];
+    /** Token usage from the AI provider — undefined when call failed or provider didn't report usage */
+    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
 export const VALID_IMAGE_GEN_MODELS = [

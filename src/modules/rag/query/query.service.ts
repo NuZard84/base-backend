@@ -6,6 +6,9 @@ import { PrismaService } from 'prisma/prisma.service';
 import { VectorSearchService } from '../vector-search/vector-search.service';
 import { PromptBuilderService, ContextSource } from './prompt-builder.service';
 import { RagQueryDto, VectorSearchDto } from './dto/rag-query.dto';
+import { PlanService } from '../../../common/plans/plan.service';
+import { RESOURCE_TYPES } from '../../../common/plans/plan-config';
+import { normalizeTokenUsage } from '../../../common/ai/token-usage';
 
 export interface RagQueryResponse {
   query: string;
@@ -39,6 +42,7 @@ export class QueryService {
     private readonly config: ConfigService,
     private readonly vectorSearch: VectorSearchService,
     private readonly promptBuilder: PromptBuilderService,
+    private readonly planService: PlanService,
   ) {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (apiKey) {
@@ -96,6 +100,7 @@ export class QueryService {
 
     const responseText = result.text ?? '';
     const generationTimeMs = Date.now() - t1;
+    const tokenUsage = normalizeTokenUsage('gemini', (result as any).usageMetadata);
 
     // 4. Persist to RAGQuery log
     const ragQuery = await this.prisma.rAGQuery.create({
@@ -112,6 +117,15 @@ export class QueryService {
         documentIds: [...new Set(builtContext.sources.map((s) => s.documentId))],
       },
     });
+
+    // Fire-and-forget usage log — never block the response
+    this.planService.logUsage(
+      userId,
+      RESOURCE_TYPES.AI_REQUEST,
+      1,
+      { source: 'rag_query', model, queryId: ragQuery.id },
+      tokenUsage?.totalTokens,
+    ).catch((err) => this.logger.warn(`Failed to log RAG usage: ${err.message}`));
 
     this.logger.log(
       `RAG query done queryId=${ragQuery.id} chunks=${chunks.length} ` +
@@ -187,6 +201,7 @@ export class QueryService {
     const t1 = Date.now();
     const model = dto.model ?? DEFAULT_MODEL;
     let fullResponse = '';
+    let lastUsageMetadata: any = null;
 
     const stream = this.genAI!.models.generateContentStream({
       model,
@@ -200,9 +215,14 @@ export class QueryService {
         fullResponse += token;
         subject.next(this.sseEvent({ type: 'token', token } satisfies StreamChunk));
       }
+      // usageMetadata appears on the last chunk
+      if ((chunk as any).usageMetadata) {
+        lastUsageMetadata = (chunk as any).usageMetadata;
+      }
     }
 
     const generationTimeMs = Date.now() - t1;
+    const tokenUsage = normalizeTokenUsage('gemini', lastUsageMetadata);
 
     // 4. Persist
     const ragQuery = await this.prisma.rAGQuery.create({
@@ -219,6 +239,15 @@ export class QueryService {
         documentIds: [...new Set(builtContext.sources.map((s) => s.documentId))],
       },
     });
+
+    // Fire-and-forget usage log for streaming queries
+    this.planService.logUsage(
+      userId,
+      RESOURCE_TYPES.AI_REQUEST,
+      1,
+      { source: 'rag_stream', model, queryId: ragQuery.id },
+      tokenUsage?.totalTokens,
+    ).catch((err) => this.logger.warn(`Failed to log RAG stream usage: ${err.message}`));
 
     subject.next(this.sseEvent({ type: 'done', queryId: ragQuery.id } satisfies StreamChunk));
     subject.complete();

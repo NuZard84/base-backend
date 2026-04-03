@@ -66,10 +66,14 @@ export class GeminiController {
     })
     async generate(@Body() body: { data: AiRequestData; config?: AiRequestConfig }, @Request() req: any) {
         const result = await this.geminiService.generateContent(body.data, body.config);
-        // Log usage after successful generation
-        await this.planService.logUsage(req.user.userId, RESOURCE_TYPES.AI_REQUEST, 1, {
-            model: body.config?.model || 'gemini-2.0-flash-lite',
-        });
+        // Log usage after successful generation — include token count when available
+        await this.planService.logUsage(
+            req.user.userId,
+            RESOURCE_TYPES.AI_REQUEST,
+            1,
+            { model: body.config?.model || 'gemini-2.0-flash-lite' },
+            result.tokenUsage?.totalTokens,
+        );
         return result;
     }
 
@@ -106,11 +110,14 @@ export class GeminiController {
             throw new BadRequestException('Query parameter "q" must not be empty.');
         }
         const result = await this.geminiService.getRealTimeData(q.trim());
-        // Log search as AI request usage
-        await this.planService.logUsage(req.user.userId, RESOURCE_TYPES.AI_REQUEST, 1, {
-            type: 'search',
-            query: q.substring(0, 100),
-        });
+        // Log search as AI request usage — include token count when available
+        await this.planService.logUsage(
+            req.user.userId,
+            RESOURCE_TYPES.AI_REQUEST,
+            1,
+            { type: 'search', query: q.substring(0, 100) },
+            result.tokenUsage?.totalTokens,
+        );
         return result;
     }
 }

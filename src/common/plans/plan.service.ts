@@ -111,6 +111,34 @@ export class PlanService {
     return result._sum.quantity ?? 0;
   }
 
+  async countMonthlyAiTokens(userId: string): Promise<number> {
+    const monthStart = this.getMonthStart();
+
+    // Sum token counts for rows that have tokensUsed populated
+    const tokenSum = await this.prisma.usageLog.aggregate({
+      where: {
+        userId,
+        resourceType: RESOURCE_TYPES.AI_REQUEST,
+        createdAt: { gte: monthStart },
+        tokensUsed: { not: null },
+      },
+      _sum: { tokensUsed: true },
+    });
+
+    // For pre-migration rows (tokensUsed IS NULL), count each as 1 token
+    // so legacy data still contributes to the quota. Remove this after one full billing cycle.
+    const legacyCount = await this.prisma.usageLog.count({
+      where: {
+        userId,
+        resourceType: RESOURCE_TYPES.AI_REQUEST,
+        createdAt: { gte: monthStart },
+        tokensUsed: null,
+      },
+    });
+
+    return (tokenSum._sum.tokensUsed ?? 0) + legacyCount;
+  }
+
   async countMonthlyImageGen(userId: string): Promise<number> {
     const result = await this.prisma.usageLog.aggregate({
       where: {
@@ -187,9 +215,9 @@ export class PlanService {
       }
 
       case 'ai_requests': {
-        const limit = plan.limits.maxAiRequestsPerMonth;
+        const limit = plan.limits.maxAiTokensPerMonth;
         if (limit === -1) return;
-        const current = await this.countMonthlyAiRequests(userId);
+        const current = await this.countMonthlyAiTokens(userId);
         if (current >= limit) {
           throw new ForbiddenException({
             code: 'PLAN_LIMIT_EXCEEDED',
@@ -197,7 +225,7 @@ export class PlanService {
             current,
             limit,
             resetAt: this.getMonthEnd().toISOString(),
-            message: `You've used all your AI requests this month (${current}/${limit}). Resets on ${this.getMonthEnd().toLocaleDateString()}.`,
+            message: `You've used ${current.toLocaleString()} of your ${limit.toLocaleString()} monthly AI tokens. Resets on ${this.getMonthEnd().toLocaleDateString()}.`,
           });
         }
         break;
@@ -293,12 +321,14 @@ export class PlanService {
     resourceType: string,
     quantity: number = 1,
     metadata: Record<string, any> = {},
+    tokensUsed?: number,
   ): Promise<void> {
     await this.prisma.usageLog.create({
       data: {
         userId,
         resourceType,
         quantity,
+        tokensUsed: tokensUsed ?? null,
         metadata: metadata as any,
       },
     });
@@ -315,9 +345,9 @@ export class PlanService {
     const plan = await this.getEffectivePlan(userId);
     const resetAt = this.getMonthEnd().toISOString();
 
-    const [projects, aiRequests, imageGen, storageMb] = await Promise.all([
+    const [projects, aiTokens, imageGen, storageMb] = await Promise.all([
       this.countProjects(userId),
-      this.countMonthlyAiRequests(userId),
+      this.countMonthlyAiTokens(userId),
       this.countMonthlyImageGen(userId),
       this.countStorageMb(userId),
     ]);
@@ -328,8 +358,8 @@ export class PlanService {
         limit: plan.limits.maxProjects,
       },
       aiRequests: {
-        current: aiRequests,
-        limit: plan.limits.maxAiRequestsPerMonth,
+        current: aiTokens,
+        limit: plan.limits.maxAiTokensPerMonth,
         resetAt,
       },
       imageGen: {

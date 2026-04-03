@@ -323,6 +323,7 @@ model UsageLog {
 
   resourceType String
   quantity     Int      @default(1)
+  tokensUsed   Int?
   costUsd      Decimal? @db.Decimal(10, 6)
 
   metadata Json @default("{}")
@@ -511,7 +512,7 @@ model PlanFeatureOverride {
 model PlanLimitOverride {
   id        String   @id @default(uuid())
   tier      PlanTier
-  limitKey  String   // matches limit field name (e.g. 'maxProjects', 'maxAiRequestsPerMonth')
+  limitKey  String   // matches limit field name (e.g. 'maxProjects', 'maxAiTokensPerMonth')
   value     Int      // -1 = unlimited
   updatedAt DateTime @updatedAt
   updatedBy String?

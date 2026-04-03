@@ -4,6 +4,7 @@ import { GoogleGenAI } from '@google/genai';
 import { AiRequestData, AiRequestConfig, AiResponse, queryType, ImageGenRequestDto, ImageGenResponseDto, GeneratedImageItem, VALID_IMAGE_GEN_MODELS } from '../types';
 import { S3Service } from '../../attachments/s3.service';
 import { PrismaService } from 'prisma/prisma.service';
+import { normalizeTokenUsage, NormalizedTokenUsage } from '../../../common/ai/token-usage';
 
 export interface GroundingSource {
     title: string;
@@ -13,6 +14,7 @@ export interface GroundingSource {
 export interface RealTimeDataResponse {
     answer: string;
     sources: GroundingSource[];
+    tokenUsage?: NormalizedTokenUsage;
 }
 
 @Injectable()
@@ -138,10 +140,13 @@ Follow this layout for all non-trivial queries:
 
             this.logger.log(isSearch ? `[isSearch] Got ${sources?.length ?? 0} grounding source(s).` : '');
 
+            const tokenUsage = normalizeTokenUsage('gemini', (response as any).usageMetadata) ?? undefined;
+
             return {
                 success: true,
                 text: response.text,
                 ...(sources !== undefined ? { sources } : {}),
+                ...(tokenUsage ? { tokenUsage } : {}),
             };
         } catch (error) {
             this.logger.error(`Error generating content: ${error.message}`, error.stack);
@@ -337,7 +342,9 @@ Follow this layout for all non-trivial queries:
 
             this.logger.log(`[getRealTimeData] Got ${sources.length} grounding source(s).`);
 
-            return { answer, sources };
+            const tokenUsage = normalizeTokenUsage('gemini', (response as any).usageMetadata) ?? undefined;
+
+            return { answer, sources, ...(tokenUsage ? { tokenUsage } : {}) };
         } catch (error) {
             this.logger.error(
                 `[getRealTimeData] Error: ${error?.message}`,

@@ -48,6 +48,7 @@ export interface AdminUserRow {
   lastLoginAt: Date | null;
   canvasCount: number;
   aiRequestsThisMonth: number;
+  aiTokensThisMonth: number;
   imageGenThisMonth: number;
   storageUsedMb: number;
 }
@@ -315,11 +316,16 @@ export class AdminService {
 
     // Fetch usage in one query per resource type
     const userIds = rawUsers.map((u) => u.id);
-    const [aiUsage, imageUsage, storageData] = await Promise.all([
+    const [aiUsage, aiTokenUsage, imageUsage, storageData] = await Promise.all([
       this.prisma.usageLog.groupBy({
         by: ['userId'],
         _sum: { quantity: true },
         where: { userId: { in: userIds }, resourceType: 'ai_request', createdAt: { gte: startOfMonth } },
+      }),
+      this.prisma.usageLog.groupBy({
+        by: ['userId'],
+        _sum: { tokensUsed: true },
+        where: { userId: { in: userIds }, resourceType: 'ai_request', createdAt: { gte: startOfMonth }, tokensUsed: { not: null } },
       }),
       this.prisma.usageLog.groupBy({
         by: ['userId'],
@@ -334,6 +340,7 @@ export class AdminService {
     ]);
 
     const aiMap = Object.fromEntries(aiUsage.map((u) => [u.userId, u._sum.quantity ?? 0]));
+    const aiTokenMap = Object.fromEntries(aiTokenUsage.map((u) => [u.userId, u._sum.tokensUsed ?? 0]));
     const imgMap = Object.fromEntries(imageUsage.map((u) => [u.userId, u._sum.quantity ?? 0]));
     const storMap = Object.fromEntries(
       storageData.map((u) => [u.userId, Math.round((u._sum.sizeBytes ?? 0) / (1024 * 1024))]),
@@ -352,6 +359,7 @@ export class AdminService {
       lastLoginAt: u.lastLoginAt,
       canvasCount: u._count.canvases,
       aiRequestsThisMonth: aiMap[u.id] ?? 0,
+      aiTokensThisMonth: aiTokenMap[u.id] ?? 0,
       imageGenThisMonth: imgMap[u.id] ?? 0,
       storageUsedMb: storMap[u.id] ?? 0,
     }));

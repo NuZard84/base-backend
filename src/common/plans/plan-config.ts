@@ -5,7 +5,7 @@
 
 export interface PlanLimits {
   maxProjects: number; // -1 = unlimited
-  maxAiRequestsPerMonth: number;
+  maxAiTokensPerMonth: number;
   maxImageGenPerMonth: number;
   maxStorageMb: number;
   maxNodesPerCanvas: number;
@@ -66,7 +66,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: true,
     limits: {
       maxProjects: 3,
-      maxAiRequestsPerMonth: 100,
+      maxAiTokensPerMonth: 50_000,
       maxImageGenPerMonth: 10,
       maxStorageMb: 10,
       maxNodesPerCanvas: 50,
@@ -94,7 +94,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: false, // hidden — reserved for future use
     limits: {
       maxProjects: 15,
-      maxAiRequestsPerMonth: 500,
+      maxAiTokensPerMonth: 500_000,
       maxImageGenPerMonth: 50,
       maxStorageMb: 500,
       maxNodesPerCanvas: 200,
@@ -122,7 +122,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: true,
     limits: {
       maxProjects: -1,
-      maxAiRequestsPerMonth: 2000,
+      maxAiTokensPerMonth: 2_000_000,
       maxImageGenPerMonth: 200,
       maxStorageMb: 5120, // 5 GB
       maxNodesPerCanvas: 500,
@@ -150,7 +150,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: true,
     limits: {
       maxProjects: -1,
-      maxAiRequestsPerMonth: 10000,
+      maxAiTokensPerMonth: 10_000_000,
       maxImageGenPerMonth: 1000,
       maxStorageMb: 51200, // 50 GB
       maxNodesPerCanvas: -1,

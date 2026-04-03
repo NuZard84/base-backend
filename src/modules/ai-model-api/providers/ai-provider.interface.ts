@@ -29,6 +29,7 @@ export interface SummarizeResult {
   summary: string;
   provider: string;
   model: string;
+  tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }
 
 /** Every AI provider (Gemini, OpenAI, Claude …) must implement this interface */
