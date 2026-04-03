@@ -176,12 +176,13 @@ export class PlanService {
   }
 
   async countCollaborators(canvasId: string): Promise<number> {
-    return this.prisma.canvasShare.count({
+    const shareCount = await this.prisma.canvasShare.count({
       where: {
         canvasId,
         status: { in: ['ACTIVE', 'PENDING'] },
       },
     });
+    return shareCount + 1; // +1 for the owner (not stored in CanvasShare table)
   }
 
   // ─── Limit Enforcement ─────────────────────────────────────────────────────

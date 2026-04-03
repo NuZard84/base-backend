@@ -35,6 +35,16 @@ export interface PlanDefinition {
   features: PlanFeatures;
 }
 
+// Models available on the FREE tier (Gemini 2.x and 2.5.x only)
+// Any model NOT in this set requires the advancedAiModels feature flag.
+export const FREE_TIER_AI_MODELS = new Set([
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+]);
+
 // Resource types used in UsageLog for tracking
 export const RESOURCE_TYPES = {
   AI_REQUEST: 'ai_request',
@@ -70,10 +80,10 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxImageGenPerMonth: 10,
       maxStorageMb: 10,
       maxNodesPerCanvas: 50,
-      maxCollaboratorsPerCanvas: 0,
+      maxCollaboratorsPerCanvas: 2,
     },
     features: {
-      collaboration: false,
+      collaboration: true,
       customFlowExports: false,
       customAiPrompts: false,
       ragDocumentUpload: false,
@@ -98,7 +108,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxImageGenPerMonth: 50,
       maxStorageMb: 500,
       maxNodesPerCanvas: 200,
-      maxCollaboratorsPerCanvas: 2,
+      maxCollaboratorsPerCanvas: 5,
     },
     features: {
       collaboration: true,
@@ -126,7 +136,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxImageGenPerMonth: 200,
       maxStorageMb: 5120, // 5 GB
       maxNodesPerCanvas: 500,
-      maxCollaboratorsPerCanvas: 5,
+      maxCollaboratorsPerCanvas: 10,
     },
     features: {
       collaboration: true,
@@ -154,7 +164,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxImageGenPerMonth: 1000,
       maxStorageMb: 51200, // 50 GB
       maxNodesPerCanvas: -1,
-      maxCollaboratorsPerCanvas: -1,
+      maxCollaboratorsPerCanvas: 15,
     },
     features: {
       collaboration: true,

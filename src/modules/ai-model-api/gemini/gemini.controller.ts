@@ -1,11 +1,11 @@
-import { Controller, Post, Get, Body, Query, BadRequestException, Logger, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, BadRequestException, ForbiddenException, UseGuards, Request } from '@nestjs/common';
 import { GeminiService } from './gemini.service';
 import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { PlanGuard } from '../../../common/plans/plan.guard';
 import { CheckLimit, RequireFeature } from '../../../common/plans/plan.decorator';
 import { PlanService } from '../../../common/plans/plan.service';
-import { RESOURCE_TYPES } from '../../../common/plans/plan-config';
+import { RESOURCE_TYPES, FREE_TIER_AI_MODELS } from '../../../common/plans/plan-config';
 import { Throttle } from '@nestjs/throttler';
 
 import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto } from '../types';
@@ -65,6 +65,11 @@ export class GeminiController {
         },
     })
     async generate(@Body() body: { data: AiRequestData; config?: AiRequestConfig }, @Request() req: any) {
+        const requestedModel = body.config?.model || 'gemini-2.0-flash-lite';
+        if (!FREE_TIER_AI_MODELS.has(requestedModel)) {
+            // Model requires advancedAiModels feature — enforce on the backend
+            await this.planService.requireFeature(req.user.userId, 'advancedAiModels');
+        }
         const result = await this.geminiService.generateContent(body.data, body.config);
         // Log usage after successful generation — include token count when available
         await this.planService.logUsage(
