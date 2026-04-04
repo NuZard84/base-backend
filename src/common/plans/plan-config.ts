@@ -21,6 +21,7 @@ export interface PlanFeatures {
   advancedAiModels: boolean;
   imageGeneration: boolean;
   prioritySupport: boolean;
+  importChat: boolean;
 }
 
 export interface PlanDefinition {
@@ -91,6 +92,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       advancedAiModels: false,
       imageGeneration: true, // FREE gets 10/month (capped by maxImageGenPerMonth limit)
       prioritySupport: false,
+      importChat: false,
     },
   },
 
@@ -119,6 +121,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       advancedAiModels: false,
       imageGeneration: true,
       prioritySupport: false,
+      importChat: false,
     },
   },
 
@@ -147,6 +150,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       advancedAiModels: true,
       imageGeneration: true,
       prioritySupport: true,
+      importChat: true,
     },
   },
 
@@ -175,6 +179,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       advancedAiModels: true,
       imageGeneration: true,
       prioritySupport: true,
+      importChat: true,
     },
   },
 };
