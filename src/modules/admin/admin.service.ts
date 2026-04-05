@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { PLAN_CONFIG } from '../../common/plans/plan-config';
+import { StripeService } from '../stripe/stripe.service';
+import { PlanTier, PaymentStatus, SubscriptionStatus } from '@prisma/client';
 
 export interface AdminAnalytics {
   totals: {
@@ -67,9 +69,16 @@ export interface PlanOverrideConfig {
   limits: Record<string, number | null>;    // null = using default
 }
 
+// Price ID → PlanTier map (loaded lazily from env via StripeService config)
+const PRICE_TO_TIER: Record<string, PlanTier> = {};
+
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminService.name);
+  constructor(
+    private prisma: PrismaService,
+    private stripeService: StripeService,
+  ) {}
 
   // ─── Analytics cache (60s TTL — the 8-query aggregate is expensive) ─────────
   private analyticsCache: { data: AdminAnalytics; expiresAt: number } | null = null;
@@ -398,7 +407,7 @@ export class AdminService {
       this.prisma.planLimitOverride.findMany(),
     ]);
 
-    const tiers = ['FREE', 'STARTER', 'PRO', 'ENTERPRISE'];
+    const tiers = ['FREE', 'STARTER', 'PLUS', 'PRO'];
     return tiers.map((tier) => {
       const baseConfig = PLAN_CONFIG[tier];
       const tierFeatureOverrides = featureOverrides.filter((o) => o.tier === tier);
@@ -478,106 +487,311 @@ export class AdminService {
     return row?.value ?? defaultValue;
   }
 
-  // ─── Revenue (stub — populated once Stripe/Razorpay is integrated) ──────────
+  // ─── Revenue ─────────────────────────────────────────────────────────────────
 
   async getRevenueAnalytics(_gateway?: string) {
-    // Compute MRR/ARR estimate from active paid subscriptions using plan pricing
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = startOfMonth;
 
-    // Paid plan prices in USD (mirrors plan-config displayPrice)
-    const PLAN_PRICE_USD: Record<string, number> = {
-      FREE: 0,
-      STARTER: 0,
-      PRO: 12,
-      ENTERPRISE: 29,
-    };
+    // ── Real revenue from Payment table ──────────────────────────────────────
 
-    const [planCounts, newPaidThisMonth, newPaidLastMonth] = await Promise.all([
-      // Active paid users per plan
-      this.prisma.user.groupBy({
-        by: ['plan'],
-        _count: { plan: true },
-        where: { status: 'ACTIVE', plan: { in: ['PRO', 'ENTERPRISE'] } },
+    const [
+      revenueThisMonthRaw,
+      totalRevenueRaw,
+      activeSubscriptions,
+      newPaidThisMonth,
+      newPaidLastMonth,
+      paymentCount,
+    ] = await Promise.all([
+      // Actual revenue collected this month (SUCCEEDED payments)
+      this.prisma.payment.aggregate({
+        _sum: { amountCents: true },
+        where: { status: 'SUCCEEDED', createdAt: { gte: startOfMonth } },
       }),
-      // New paid subscribers this month (rough proxy)
+      // All-time total revenue (SUCCEEDED only, exclude refunds)
+      this.prisma.payment.aggregate({
+        _sum: { amountCents: true },
+        where: { status: 'SUCCEEDED' },
+      }),
+      // Active paid subscribers
       this.prisma.user.count({
-        where: { plan: { in: ['PRO', 'ENTERPRISE'] }, createdAt: { gte: startOfMonth } },
+        where: { status: 'ACTIVE', plan: { in: ['PRO', 'PLUS'] } },
       }),
+      // New paid this month
       this.prisma.user.count({
-        where: {
-          plan: { in: ['PRO', 'ENTERPRISE'] },
-          createdAt: { gte: startOfLastMonth, lt: startOfMonth },
-        },
+        where: { plan: { in: ['PRO', 'PLUS'] }, createdAt: { gte: startOfMonth } },
       }),
+      // New paid last month (for churn calc)
+      this.prisma.user.count({
+        where: { plan: { in: ['PRO', 'PLUS'] }, createdAt: { gte: startOfLastMonth, lt: endOfLastMonth } },
+      }),
+      // Whether we have any real payment data
+      this.prisma.payment.count(),
     ]);
 
-    const mrr = planCounts.reduce((sum, p) => {
-      return sum + (PLAN_PRICE_USD[p.plan] ?? 0) * p._count.plan;
-    }, 0);
+    // MRR — use real payment data if available, fall back to subscription count estimate
+    const PLAN_PRICE_CENTS: Record<string, number> = { PLUS: 1399, PRO: 2999 };
+    let mrrCents = revenueThisMonthRaw._sum.amountCents ?? 0;
+    if (mrrCents === 0) {
+      // Estimate from active subscriptions (fallback before any payments)
+      const planCounts = await this.prisma.user.groupBy({
+        by: ['plan'],
+        _count: { plan: true },
+        where: { status: 'ACTIVE', plan: { in: ['PRO', 'PLUS'] } },
+      });
+      mrrCents = planCounts.reduce((s, p) => s + (PLAN_PRICE_CENTS[p.plan] ?? 0) * p._count.plan, 0);
+    }
+    const mrrUsd = Math.round(mrrCents / 100);
 
-    // Monthly revenue for last 12 months (proxy: MRR-equivalent per month using signup data)
+    // ── Monthly revenue — last 12 months from Payment table ──────────────────
+
     const months: { month: string; revenue: number; subscriptions: number }[] = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const nextD = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       const label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
 
-      // Count paid users active in that month (approximation: created before end of month)
-      const [proCount, entCount] = await Promise.all([
-        this.prisma.user.count({ where: { plan: 'PRO', createdAt: { lt: nextD } } }),
-        this.prisma.user.count({ where: { plan: 'ENTERPRISE', createdAt: { lt: nextD } } }),
+      const [revRaw, subCount] = await Promise.all([
+        this.prisma.payment.aggregate({
+          _sum: { amountCents: true },
+          where: { status: 'SUCCEEDED', createdAt: { gte: d, lt: nextD } },
+        }),
+        this.prisma.user.count({
+          where: { plan: { in: ['PRO', 'PLUS'] }, createdAt: { lt: nextD } },
+        }),
       ]);
-      const rev = proCount * PLAN_PRICE_USD.PRO + entCount * PLAN_PRICE_USD.ENTERPRISE;
-      months.push({ month: label, revenue: rev, subscriptions: proCount + entCount });
+
+      months.push({
+        month: label,
+        revenue: Math.round((revRaw._sum.amountCents ?? 0) / 100),
+        subscriptions: subCount,
+      });
     }
 
-    // Plan revenue breakdown
-    const allPlanCounts = await this.prisma.user.groupBy({
+    // ── Plan revenue breakdown ────────────────────────────────────────────────
+
+    const planPayments = await this.prisma.payment.groupBy({
       by: ['plan'],
+      _sum: { amountCents: true },
       _count: { plan: true },
-      where: { status: 'ACTIVE' },
+      where: { status: 'SUCCEEDED' },
     });
-    const planRevenue = allPlanCounts.map((p) => ({
+    const planRevenue = planPayments.map((p) => ({
       plan: p.plan,
-      revenue: (PLAN_PRICE_USD[p.plan] ?? 0) * p._count.plan,
+      revenue: Math.round((p._sum.amountCents ?? 0) / 100),
       count: p._count.plan,
     }));
 
-    const activeSubscriptions = planCounts.reduce((s, p) => s + p._count.plan, 0);
+    const totalRevenueUsd = Math.round((totalRevenueRaw._sum.amountCents ?? 0) / 100);
+    const revenueThisMonthUsd = Math.round((revenueThisMonthRaw._sum.amountCents ?? 0) / 100);
 
     return {
       summary: {
-        mrr,
-        arr: mrr * 12,
-        revenueThisMonth: mrr, // proxy
-        totalRevenue: months.reduce((s, m) => s + m.revenue, 0),
+        mrr: mrrUsd,
+        arr: mrrUsd * 12,
+        revenueThisMonth: revenueThisMonthUsd,
+        totalRevenue: totalRevenueUsd,
         activeSubscriptions,
         newSubscriptionsThisMonth: newPaidThisMonth,
         churnedThisMonth: Math.max(0, newPaidLastMonth - newPaidThisMonth),
       },
       monthlyRevenue: months,
       planRevenue,
-      // Will be populated once Stripe/Razorpay webhooks are set up
-      connectedGateways: [] as string[],
+      connectedGateways: paymentCount > 0 ? ['stripe'] : [],
     };
+  }
+
+  /**
+   * Pull the user's current subscription + invoice state from Stripe and
+   * write it into the DB. Fixes plan/status drift when webhooks were missed.
+   */
+  async syncUserFromStripe(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { id: true, email: true, stripeId: true, subscriptionId: true, plan: true },
+    });
+
+    if (!user.stripeId) {
+      return { synced: false, reason: 'User has no Stripe customer ID — never completed a checkout' };
+    }
+
+    this.logger.log(`Syncing user ${userId} (${user.email}) from Stripe customer ${user.stripeId}`);
+
+    // ── 1. Sync plan + subscription status ────────────────────────────────────
+    const subscriptions = await this.stripeService.listActiveSubscriptions(user.stripeId);
+    const activeSub = subscriptions.find((s) =>
+      ['active', 'trialing', 'past_due', 'paused'].includes(s.status),
+    ) ?? subscriptions[0];
+
+    const PRICE_ENV: Record<string, PlanTier> = {
+      [process.env.STRIPE_PRICE_PLUS ?? '']: PlanTier.PLUS,
+      [process.env.STRIPE_PRICE_PRO ?? '']: PlanTier.PRO,
+      [process.env.STRIPE_PRICE_STARTER ?? '']: PlanTier.STARTER,
+    };
+
+    let newPlan: PlanTier = PlanTier.FREE;
+    let newStatus: SubscriptionStatus = SubscriptionStatus.ACTIVE;
+    let subscriptionId: string | null = null;
+
+    if (activeSub) {
+      const priceId = activeSub.items.data[0]?.price?.id ?? '';
+      newPlan = PRICE_ENV[priceId] ?? PlanTier.FREE;
+      subscriptionId = activeSub.id;
+      switch (activeSub.status) {
+        case 'active':    newStatus = SubscriptionStatus.ACTIVE; break;
+        case 'trialing':  newStatus = SubscriptionStatus.TRIALING; break;
+        case 'past_due':
+        case 'paused':
+        case 'incomplete': newStatus = SubscriptionStatus.PAUSED; break;
+        case 'canceled':  newStatus = SubscriptionStatus.CANCELED; newPlan = PlanTier.FREE; subscriptionId = null; break;
+      }
+    }
+
+    const isPaid = newPlan === PlanTier.PLUS || newPlan === PlanTier.PRO;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        plan: newPlan,
+        status: newStatus,
+        subscriptionId,
+        ...(isPaid && { trialEndsAt: null, trialTier: null }),
+      },
+    });
+
+    this.logger.log(`Synced user ${userId}: plan=${newPlan} status=${newStatus} sub=${subscriptionId}`);
+
+    // ── 2. Backfill missing Payment records from Stripe invoices ──────────────
+    const invoices = await this.stripeService.listPaidInvoices(user.stripeId, 20);
+    let invoicesCreated = 0;
+
+    for (const inv of invoices) {
+      if (!inv.id) continue;
+      const exists = await this.prisma.payment.findUnique({ where: { stripeInvoiceId: inv.id } });
+      if (exists) continue;
+
+      const lineItem = (inv as any).lines?.data?.[0];
+      const priceId = lineItem?.price?.id ?? '';
+      const plan = PRICE_ENV[priceId] ?? newPlan;
+      const periodStart = lineItem?.period?.start ? new Date(lineItem.period.start * 1000) : null;
+      const periodEnd   = lineItem?.period?.end   ? new Date(lineItem.period.end   * 1000) : null;
+
+      await this.prisma.payment.create({
+        data: {
+          userId,
+          stripeInvoiceId: inv.id,
+          plan,
+          amountCents: (inv as any).amount_paid ?? 0,
+          currency: inv.currency ?? 'usd',
+          status: PaymentStatus.SUCCEEDED,
+          periodStart,
+          periodEnd,
+          invoiceUrl: (inv as any).hosted_invoice_url ?? null,
+          invoicePdf: (inv as any).invoice_pdf ?? null,
+          createdAt: new Date((inv as any).created * 1000),
+        },
+      });
+      invoicesCreated++;
+    }
+
+    this.logger.log(`Backfilled ${invoicesCreated} invoice(s) for user ${userId}`);
+
+    return {
+      synced: true,
+      plan: newPlan,
+      status: newStatus,
+      subscriptionId,
+      invoicesBackfilled: invoicesCreated,
+    };
+  }
+
+  async getWebhookLogs(page: number, pageSize: number, status?: string, eventType?: string) {
+    const skip = (page - 1) * pageSize;
+    const where: any = {};
+    if (status && status !== 'All') where.status = status;
+    if (eventType && eventType !== 'All') where.eventType = { contains: eventType, mode: 'insensitive' };
+
+    const [logs, total] = await Promise.all([
+      this.prisma.webhookLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          eventId: true,
+          eventType: true,
+          status: true,
+          error: true,
+          userId: true,
+          processedAt: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.webhookLog.count({ where }),
+    ]);
+
+    return { logs, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   async getTransactions(
     page: number,
     pageSize: number,
     _gateway?: string,
-    _status?: string,
-    _search?: string,
+    status?: string,
+    search?: string,
   ) {
-    // Stub — returns empty until payment gateway is integrated
+    const skip = (page - 1) * pageSize;
+
+    // Build search filter — match on user email or stripeInvoiceId
+    const searchFilter = search
+      ? {
+          OR: [
+            { stripeInvoiceId: { contains: search, mode: 'insensitive' as const } },
+            { user: { email: { contains: search, mode: 'insensitive' as const } } },
+          ],
+        }
+      : {};
+
+    const statusFilter = status && status !== 'All' ? { status: status as any } : {};
+
+    const where = { ...searchFilter, ...statusFilter };
+
+    const [payments, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        include: {
+          user: { select: { email: true, name: true } },
+        },
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    const transactions = payments.map((p) => ({
+      id: p.id,
+      date: p.createdAt.toISOString(),
+      userEmail: p.user.email,
+      userName: p.user.name,
+      plan: p.plan,
+      amount: p.amountCents,
+      currency: p.currency,
+      gateway: 'stripe' as const,
+      status: p.status,
+      transactionId: p.stripeInvoiceId ?? p.id,
+      invoiceUrl: p.invoiceUrl,
+      invoicePdf: p.invoicePdf,
+    }));
+
     return {
-      transactions: [] as any[],
-      total: 0,
+      transactions,
+      total,
       page,
       pageSize,
-      totalPages: 0,
+      totalPages: Math.ceil(total / pageSize),
     };
   }
 }

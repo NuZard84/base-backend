@@ -3,9 +3,10 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminGuard } from './admin.guard';
 import { RedisModule } from 'src/redis/redis.module';
+import { StripeModule } from '../stripe/stripe.module';
 
 @Module({
-  imports: [RedisModule],
+  imports: [RedisModule, StripeModule],
   controllers: [AdminController],
   providers: [AdminService, AdminGuard],
 })

@@ -63,10 +63,10 @@ export class AuthService implements OnModuleInit {
             googleId: profile.id,
             lastLoginAt: new Date(),
             trialEndsAt: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
-            trialTier: 'PRO',
+            trialTier: 'STARTER',
           },
         });
-        this.logger.log(`New user created with ${trialDays}-day PRO trial: ${email}`);
+        this.logger.log(`New user created with ${trialDays}-day Free Starter trial: ${email}`);
       } else {
         user = await this.prisma.user.update({
           where: { id: user.id },

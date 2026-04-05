@@ -206,6 +206,32 @@ export class AdminController implements OnModuleInit {
     );
   }
 
+  // ─── Stripe Sync (repair missed webhooks) ────────────────────────────────────
+
+  @Post('users/:id/sync-stripe')
+  @UseGuards(AdminGuard)
+  syncUserFromStripe(@Param('id') id: string) {
+    return this.adminService.syncUserFromStripe(id);
+  }
+
+  // ─── Webhook Logs ────────────────────────────────────────────────────────────
+
+  @Get('webhook-logs')
+  @UseGuards(AdminGuard)
+  getWebhookLogs(
+    @Query('page') page = '1',
+    @Query('pageSize') pageSize = '50',
+    @Query('status') status?: string,
+    @Query('eventType') eventType?: string,
+  ) {
+    return this.adminService.getWebhookLogs(
+      parseInt(page, 10),
+      parseInt(pageSize, 10),
+      status,
+      eventType,
+    );
+  }
+
   // ─── App Config ──────────────────────────────────────────────────────────────
 
   @Get('config')

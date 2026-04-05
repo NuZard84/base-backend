@@ -15,7 +15,7 @@ enum PlanTier {
   FREE
   STARTER
   PRO
-  ENTERPRISE
+  PLUS
 }
 
 enum SubscriptionStatus {
@@ -65,6 +65,13 @@ enum PrePromptTemplateType {
   FEATURE
 }
 
+enum PaymentStatus {
+  SUCCEEDED
+  FAILED
+  PENDING
+  REFUNDED
+}
+
 enum CanvasRole {
   OWNER
   EDITOR
@@ -103,6 +110,7 @@ model User {
   prePromptTemplates  PrePromptTemplate[]
   attachments         Attachment[]
   documents           Document[]
+  payments            Payment[]
 
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
@@ -544,4 +552,60 @@ model RAGQuery {
   @@index([userId, createdAt(sort: Desc)])
   @@index([canvasId])
   @@map("rag_queries")
+}
+
+// --- PAYMENTS (Stripe webhook-persisted transactions) ---
+
+model Payment {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  stripeInvoiceId String? @unique // Stripe invoice ID (idempotency key)
+  stripeChargeId  String? // Stripe charge ID
+
+  plan        PlanTier      @default(FREE)
+  amountCents Int           // amount in cents (e.g. 1399 = $13.99)
+  currency    String        @default("usd")
+  status      PaymentStatus
+
+  periodStart DateTime? // subscription billing period start
+  periodEnd   DateTime? // subscription billing period end
+
+  invoiceUrl String? // Stripe hosted invoice URL
+  invoicePdf String? // Stripe invoice PDF URL
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("payments")
+}
+
+// --- WEBHOOK LOGS (persistent audit trail for every Stripe event) ---
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  SKIPPED
+}
+
+model WebhookLog {
+  id        String             @id @default(uuid())
+  eventId   String             @unique // Stripe event ID — prevents duplicate processing
+  eventType String
+  status    WebhookEventStatus @default(RECEIVED)
+  error     String?            @db.Text // full error message if processing failed
+  userId    String?            // resolved userId if applicable
+  payload   Json               // full Stripe event payload for replay/debug
+
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([eventType])
+  @@index([status])
+  @@map("webhook_logs")
 }

@@ -34,6 +34,22 @@ for (const envVar of requiredEnvVars) {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // Stripe webhooks need the raw Buffer body for signature verification.
+  // This middleware captures raw bytes for that route BEFORE the JSON parser runs.
+  // Stripe webhooks need the raw Buffer body for signature verification.
+  // Must be registered BEFORE any body-parser middleware and at the exact
+  // path NestJS uses (no /api prefix since there is no global prefix).
+  app.use('/stripe/webhook', (req: any, _res, next) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    req.on('end', () => {
+      req.rawBody = Buffer.concat(chunks);
+      req._body = true; // prevents body-parser from re-parsing this route
+      next();
+    });
+    req.on('error', next);
+  });
+
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ limit: '10mb', extended: true }));
 

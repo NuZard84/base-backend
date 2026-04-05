@@ -17,6 +17,7 @@ import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { PlanModule } from './common/plans/plan.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { StripeModule } from './modules/stripe/stripe.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { AdminModule } from './modules/admin/admin.module';
     AttachmentsModule,
     DocumentsModule,
     AdminModule,
+    StripeModule,
   ],
   controllers: [AppController],
   providers: [

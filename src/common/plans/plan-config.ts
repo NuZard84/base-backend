@@ -69,8 +69,8 @@ export type FeatureKey = keyof PlanFeatures;
 export const PLAN_CONFIG: Record<string, PlanDefinition> = {
   FREE: {
     tier: 'FREE',
-    displayName: 'Free Starter',
-    description: 'Get started with the basics',
+    displayName: 'Free',
+    description: 'Basic access, always free',
     price: 0,
     currency: 'usd',
     billingPeriod: 'monthly',
@@ -79,8 +79,8 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxProjects: 3,
       maxAiTokensPerMonth: 50_000,
       maxImageGenPerMonth: 10,
-      maxStorageMb: 10,
-      maxNodesPerCanvas: 50,
+      maxStorageMb: 12,
+      maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 2,
     },
     features: {
@@ -98,24 +98,24 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
 
   STARTER: {
     tier: 'STARTER',
-    displayName: 'Starter',
-    description: 'For individuals getting serious',
-    price: 500, // $5.00
+    displayName: 'Free Starter',
+    description: 'Your free trial — more usage to get started',
+    price: 0, // free trial, no charge
     currency: 'usd',
     billingPeriod: 'monthly',
-    visible: false, // hidden — reserved for future use
+    visible: true, // shown in pricing UI as the trial plan
     limits: {
-      maxProjects: 15,
-      maxAiTokensPerMonth: 500_000,
-      maxImageGenPerMonth: 50,
-      maxStorageMb: 500,
-      maxNodesPerCanvas: 200,
-      maxCollaboratorsPerCanvas: 5,
+      maxProjects: 3,                 // SAME as FREE — no conflict when trial ends
+      maxAiTokensPerMonth: 100_000,
+      maxImageGenPerMonth: 30,
+      maxStorageMb: 12,               // SAME as FREE — no conflict when trial ends
+      maxNodesPerCanvas: -1,          // unlimited — no conflict when trial ends
+      maxCollaboratorsPerCanvas: 2,   // SAME as FREE — no conflict when trial ends
     },
     features: {
       collaboration: true,
       customFlowExports: false,
-      customAiPrompts: true,
+      customAiPrompts: false,
       ragDocumentUpload: false,
       apiAccess: false,
       advancedAiModels: false,
@@ -125,20 +125,20 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     },
   },
 
-  PRO: {
-    tier: 'PRO',
-    displayName: 'Professional',
-    description: 'For power users and creators',
-    price: 1200, // $12.00
+  PLUS: {
+    tier: 'PLUS',
+    displayName: 'Plus',
+    description: 'More power for serious creators',
+    price: 1399, // $13.99
     currency: 'usd',
     billingPeriod: 'monthly',
     visible: true,
     limits: {
       maxProjects: -1,
-      maxAiTokensPerMonth: 2_000_000,
-      maxImageGenPerMonth: 200,
-      maxStorageMb: 5120, // 5 GB
-      maxNodesPerCanvas: 500,
+      maxAiTokensPerMonth: 5_000_000,
+      maxImageGenPerMonth: 300,
+      maxStorageMb: 20480, // 20 GB
+      maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 10,
     },
     features: {
@@ -149,26 +149,26 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       apiAccess: false,
       advancedAiModels: true,
       imageGeneration: true,
-      prioritySupport: true,
+      prioritySupport: false,
       importChat: true,
     },
   },
 
-  ENTERPRISE: {
-    tier: 'ENTERPRISE',
-    displayName: 'Team Scale',
-    description: 'For teams and organizations',
-    price: 2900, // $29.00
+  PRO: {
+    tier: 'PRO',
+    displayName: 'Professional',
+    description: 'All features with maximum power',
+    price: 2999, // $29.99
     currency: 'usd',
     billingPeriod: 'monthly',
     visible: true,
     limits: {
       maxProjects: -1,
-      maxAiTokensPerMonth: 10_000_000,
+      maxAiTokensPerMonth: 20_000_000,
       maxImageGenPerMonth: 1000,
-      maxStorageMb: 51200, // 50 GB
+      maxStorageMb: 102400, // 100 GB
       maxNodesPerCanvas: -1,
-      maxCollaboratorsPerCanvas: 15,
+      maxCollaboratorsPerCanvas: -1,
     },
     features: {
       collaboration: true,

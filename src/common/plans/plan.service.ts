@@ -18,6 +18,8 @@ export interface UsageCount {
 export interface UserPlanDetails {
   plan: PlanDefinition;
   actualTier: string;
+  status: string;
+  nextBillingAt: string | null;
   trial: {
     active: boolean;
     tier: string | null;
@@ -380,10 +382,14 @@ export class PlanService {
   async getUserPlanDetails(userId: string): Promise<UserPlanDetails> {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { plan: true, trialEndsAt: true, trialTier: true },
+      select: { plan: true, status: true, trialEndsAt: true, trialTier: true },
     });
 
+    // A paid plan always supersedes any active trial — guard against stale
+    // trial fields if they weren't cleared when the subscription was activated.
+    const hasPaidPlan = user.plan === 'PLUS' || user.plan === 'PRO';
     const isTrialActive =
+      !hasPaidPlan &&
       !!user.trialEndsAt &&
       !!user.trialTier &&
       new Date(user.trialEndsAt) > new Date();
@@ -402,11 +408,22 @@ export class PlanService {
         )
       : 0;
 
-    const usage = await this.getUsageSummary(userId);
+    const [usage, latestPayment] = await Promise.all([
+      this.getUsageSummary(userId),
+      this.prisma.payment.findFirst({
+        where: { userId, status: 'SUCCEEDED' },
+        orderBy: { createdAt: 'desc' },
+        select: { periodEnd: true },
+      }),
+    ]);
+
+    const nextBillingAt = latestPayment?.periodEnd?.toISOString() ?? null;
 
     return {
       plan: effectivePlan,
       actualTier: user.plan,
+      status: user.status,
+      nextBillingAt,
       trial: {
         active: isTrialActive,
         tier: user.trialTier,
