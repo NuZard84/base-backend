@@ -14,20 +14,21 @@ export class BugReportsService {
         userId: string | null,
         userEmail: string | null,
         description: string,
-        screenshotFile?: Express.Multer.File,
+        screenshotFiles: Express.Multer.File[] = [],
     ) {
-        let screenshotKey: string | undefined;
-
-        if (screenshotFile) {
-            const ext = screenshotFile.originalname.split('.').pop() ?? 'png';
-            const key = `bug-reports/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-            await this.s3.upload({
-                key,
-                body: screenshotFile.buffer,
-                contentType: screenshotFile.mimetype,
-            });
-            screenshotKey = key;
-        }
+        // Upload all screenshots in parallel
+        const screenshotKeys = await Promise.all(
+            screenshotFiles.map(async (file) => {
+                const ext = file.originalname.split('.').pop() ?? 'png';
+                const key = `bug-reports/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+                await this.s3.upload({
+                    key,
+                    body: file.buffer,
+                    contentType: file.mimetype,
+                });
+                return key;
+            }),
+        );
 
         // Fetch user name if we have userId
         let userName: string | null = null;
@@ -45,7 +46,8 @@ export class BugReportsService {
                 userEmail,
                 userName,
                 description,
-                screenshotKey,
+                screenshotKey: screenshotKeys[0] ?? null,   // keep legacy field populated
+                screenshotKeys,
             },
             select: {
                 id: true,
@@ -77,6 +79,7 @@ export class BugReportsService {
                     id: true,
                     description: true,
                     screenshotKey: true,
+                    screenshotKeys: true,
                     status: true,
                     userEmail: true,
                     userName: true,
@@ -91,18 +94,17 @@ export class BugReportsService {
             this.prisma.bugReport.count({ where }),
         ]);
 
-        // Attach presigned screenshot URLs
+        // Attach presigned screenshot URLs for all images
         const itemsWithUrls = await Promise.all(
             items.map(async (r) => {
-                let screenshotUrl: string | null = null;
-                if (r.screenshotKey) {
-                    screenshotUrl = await this.s3.getPresignedUrl({
-                        key: r.screenshotKey,
-                        disposition: 'inline',
-                        expiresIn: 3600,
-                    });
-                }
-                return { ...r, screenshotUrl };
+                const keys = r.screenshotKeys.length > 0
+                    ? r.screenshotKeys
+                    : (r.screenshotKey ? [r.screenshotKey] : []);
+
+                const screenshotUrls = await Promise.all(
+                    keys.map(key => this.s3.getPresignedUrl({ key, disposition: 'inline', expiresIn: 3600 })),
+                );
+                return { ...r, screenshotUrls };
             }),
         );
 
@@ -143,6 +145,7 @@ export class BugReportsService {
                 id: true,
                 description: true,
                 screenshotKey: true,
+                screenshotKeys: true,
                 status: true,
                 adminNote: true,
                 createdAt: true,
@@ -152,15 +155,14 @@ export class BugReportsService {
 
         return Promise.all(
             items.map(async (r) => {
-                let screenshotUrl: string | null = null;
-                if (r.screenshotKey) {
-                    screenshotUrl = await this.s3.getPresignedUrl({
-                        key: r.screenshotKey,
-                        disposition: 'inline',
-                        expiresIn: 3600,
-                    });
-                }
-                return { ...r, screenshotUrl };
+                const keys = r.screenshotKeys.length > 0
+                    ? r.screenshotKeys
+                    : (r.screenshotKey ? [r.screenshotKey] : []);
+
+                const screenshotUrls = await Promise.all(
+                    keys.map(key => this.s3.getPresignedUrl({ key, disposition: 'inline', expiresIn: 3600 })),
+                );
+                return { ...r, screenshotUrls };
             }),
         );
     }

@@ -599,7 +599,8 @@ model BugReport {
   user          User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   description   String          @db.Text
-  screenshotKey String?         // S3 key for screenshot
+  screenshotKey  String?         // S3 key (legacy single screenshot — kept for existing data)
+  screenshotKeys String[]        // S3 keys for multiple screenshots
 
   status        BugReportStatus @default(OPEN)
 

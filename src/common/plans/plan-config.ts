@@ -78,7 +78,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     limits: {
       maxProjects: 3,
       maxAiTokensPerMonth: 50_000,
-      maxImageGenPerMonth: 10,
+      maxImageGenPerMonth: 4,
       maxStorageMb: 12,
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 2,
@@ -90,7 +90,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       ragDocumentUpload: false,
       apiAccess: false,
       advancedAiModels: false,
-      imageGeneration: true, // FREE gets 10/month (capped by maxImageGenPerMonth limit)
+      imageGeneration: true, // FREE gets 4/month (capped by maxImageGenPerMonth limit)
       prioritySupport: false,
       importChat: false,
     },
@@ -107,7 +107,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     limits: {
       maxProjects: 3,                 // SAME as FREE — no conflict when trial ends
       maxAiTokensPerMonth: 100_000,
-      maxImageGenPerMonth: 30,
+      maxImageGenPerMonth: 8,
       maxStorageMb: 12,               // SAME as FREE — no conflict when trial ends
       maxNodesPerCanvas: -1,          // unlimited — no conflict when trial ends
       maxCollaboratorsPerCanvas: 2,   // SAME as FREE — no conflict when trial ends
@@ -136,8 +136,8 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     limits: {
       maxProjects: -1,
       maxAiTokensPerMonth: 5_000_000,
-      maxImageGenPerMonth: 300,
-      maxStorageMb: 20480, // 20 GB
+      maxImageGenPerMonth: 80,
+      maxStorageMb: 5120, // 5 GB
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 10,
     },
@@ -165,8 +165,8 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     limits: {
       maxProjects: -1,
       maxAiTokensPerMonth: 20_000_000,
-      maxImageGenPerMonth: 1000,
-      maxStorageMb: 102400, // 100 GB
+      maxImageGenPerMonth: 160,
+      maxStorageMb: 20480, // 20 GB
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: -1,
     },

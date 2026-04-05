@@ -4,17 +4,18 @@ import {
     Get,
     Post,
     Req,
-    UploadedFile,
+    UploadedFiles,
     UseGuards,
     UseInterceptors,
     BadRequestException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { BugReportsService } from './bug-reports.service';
 
-const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB per file
+const MAX_FILES = 5;
 
 const ALLOWED_MIME = new Set([
     'image/jpeg',
@@ -39,11 +40,11 @@ export class BugReportsController {
     @Post()
     @UseGuards(JwtAuthGuard)
     @UseInterceptors(
-        FileInterceptor('screenshot', {
-            limits: { fileSize: MAX_SCREENSHOT_BYTES },
+        FilesInterceptor('screenshots', MAX_FILES, {
+            limits: { fileSize: MAX_FILE_BYTES },
         }),
     )
-    @ApiOperation({ summary: 'Submit a bug report with optional screenshot' })
+    @ApiOperation({ summary: 'Submit a bug report with optional screenshots (up to 5)' })
     @ApiConsumes('multipart/form-data')
     @ApiBody({
         schema: {
@@ -51,22 +52,28 @@ export class BugReportsController {
             required: ['description'],
             properties: {
                 description: { type: 'string' },
-                screenshot: { type: 'string', format: 'binary' },
+                screenshots: {
+                    type: 'array',
+                    items: { type: 'string', format: 'binary' },
+                },
             },
         },
     })
     async create(
         @Req() req,
         @Body('description') description: string,
-        @UploadedFile() screenshot?: Express.Multer.File,
+        @UploadedFiles() screenshots?: Express.Multer.File[],
     ) {
         if (!description?.trim()) {
             throw new BadRequestException('Description is required');
         }
 
-        if (screenshot && !ALLOWED_MIME.has(screenshot.mimetype)) {
+        const files = screenshots ?? [];
+
+        const invalid = files.find(f => !ALLOWED_MIME.has(f.mimetype));
+        if (invalid) {
             throw new BadRequestException(
-                'Screenshot must be a JPEG, PNG, WebP, or GIF image',
+                'Screenshots must be JPEG, PNG, WebP, or GIF images',
             );
         }
 
@@ -76,7 +83,7 @@ export class BugReportsController {
             userId ?? null,
             email ?? null,
             description.trim(),
-            screenshot,
+            files,
         );
     }
 }
