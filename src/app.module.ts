@@ -18,6 +18,7 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { PlanModule } from './common/plans/plan.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StripeModule } from './modules/stripe/stripe.module';
+import { BugReportsModule } from './modules/bug-reports/bug-reports.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { StripeModule } from './modules/stripe/stripe.module';
     DocumentsModule,
     AdminModule,
     StripeModule,
+    BugReportsModule,
   ],
   controllers: [AppController],
   providers: [

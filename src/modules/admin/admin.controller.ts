@@ -19,11 +19,15 @@ import type { Request } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { RedisService } from 'src/redis/redis.service';
 import { AdminGuard } from './admin.guard';
+import { AdminOriginGuard } from './admin-origin.guard';
 import { AdminService } from './admin.service';
+import { BugReportsService } from '../bug-reports/bug-reports.service';
+import { BugReportStatus } from '@prisma/client';
 
 const PIN_MAX = 5;
 const PIN_WINDOW_SEC = 10 * 60; // 10 minutes
 
+@UseGuards(AdminOriginGuard)
 @Controller('admin')
 export class AdminController implements OnModuleInit {
   private readonly logger = new Logger(AdminController.name);
@@ -32,6 +36,7 @@ export class AdminController implements OnModuleInit {
     private readonly adminService: AdminService,
     private readonly config: ConfigService,
     private readonly redis: RedisService,
+    private readonly bugReportsService: BugReportsService,
   ) {}
 
   onModuleInit() {
@@ -47,12 +52,22 @@ export class AdminController implements OnModuleInit {
         '⚠️  ADMIN_PIN is set to the default "123456". Change it in .env before deploying to production.',
       );
     }
+    const username = this.config.get<string>('ADMIN_USERNAME', '');
+    if (!username || username === 'admin') {
+      this.logger.warn(
+        '⚠️  ADMIN_USERNAME is using the default "admin". Set a strong username in .env before deploying to production.',
+      );
+    }
   }
 
   // ─── PIN Auth ────────────────────────────────────────────────────────────────
 
   @Post('auth/verify')
-  async verifyPin(@Body('pin') pin: string, @Req() req: Request) {
+  async verifyPin(
+    @Body('username') username: string,
+    @Body('pin') pin: string,
+    @Req() req: Request,
+  ) {
     const ip =
       (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
       req.ip ??
@@ -64,27 +79,29 @@ export class AdminController implements OnModuleInit {
     const attempts = attemptsRaw ? parseInt(attemptsRaw, 10) : 0;
 
     if (attempts >= PIN_MAX) {
-      // TTL tells us exactly how many seconds remain on the lockout window
-      // We can't call TTL directly via RedisService so we track remaining via
-      // the count. The key auto-expires via Redis TTL — just block here.
       throw new HttpException(
         `Too many failed attempts. Try again in ${PIN_WINDOW_SEC}s.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    // ── PIN format validation ────────────────────────────────────────────────
+    // ── Input validation ─────────────────────────────────────────────────────
+    if (!username?.trim()) {
+      throw new UnauthorizedException('Invalid credentials.');
+    }
     if (!pin || !/^\d{6}$/.test(pin)) {
-      throw new UnauthorizedException('PIN must be exactly 6 digits.');
+      throw new UnauthorizedException('Invalid credentials.');
     }
 
+    const expectedUsername = this.config.get<string>('ADMIN_USERNAME', 'admin');
     const expectedPin = this.config.get<string>('ADMIN_PIN', '123456');
 
-    if (pin !== expectedPin) {
-      // Increment attempt counter in Redis
+    // ── Constant-time comparison — check both together to prevent enumeration ─
+    const usernameOk = username.trim() === expectedUsername;
+    const pinOk = pin === expectedPin;
+
+    if (!usernameOk || !pinOk) {
       const newCount = await this.redis.incr(redisKey);
-      // On first failure, set the 10-minute TTL — subsequent failures just
-      // increment but keep the original window (Redis INCR preserves TTL)
       if (newCount === 1) {
         await this.redis.expire(redisKey, PIN_WINDOW_SEC);
       }
@@ -92,8 +109,8 @@ export class AdminController implements OnModuleInit {
       const remaining = PIN_MAX - newCount;
       throw new UnauthorizedException(
         remaining > 0
-          ? `Invalid PIN. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
-          : `Invalid PIN. Too many attempts — locked for ${PIN_WINDOW_SEC / 60} minutes.`,
+          ? `Invalid credentials. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`
+          : `Invalid credentials. Too many attempts — locked for ${PIN_WINDOW_SEC / 60} minutes.`,
       );
     }
 
@@ -244,5 +261,36 @@ export class AdminController implements OnModuleInit {
   @UseGuards(AdminGuard)
   setAppConfig(@Body() body: { key: string; value: string }) {
     return this.adminService.setAppConfig(body.key, body.value);
+  }
+
+  // ─── Bug Reports ─────────────────────────────────────────────────────────────
+
+  @Get('bug-reports')
+  @UseGuards(AdminGuard)
+  getBugReports(
+    @Query('page') page = '1',
+    @Query('pageSize') pageSize = '20',
+    @Query('status') status?: string,
+  ) {
+    return this.bugReportsService.findAll({
+      page: parseInt(page, 10),
+      pageSize: parseInt(pageSize, 10),
+      status,
+    });
+  }
+
+  @Get('bug-reports/stats')
+  @UseGuards(AdminGuard)
+  getBugReportStats() {
+    return this.bugReportsService.getStats();
+  }
+
+  @Patch('bug-reports/:id')
+  @UseGuards(AdminGuard)
+  updateBugReport(
+    @Param('id') id: string,
+    @Body() body: { status: BugReportStatus; adminNote?: string },
+  ) {
+    return this.bugReportsService.updateStatus(id, body.status, body.adminNote);
   }
 }

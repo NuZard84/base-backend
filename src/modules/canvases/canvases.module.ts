@@ -7,9 +7,10 @@ import { CanvasSharesController } from './canvas-shares/canvas-shares.controller
 import { CanvasesGateway } from './canvases.gateway';
 import { CanvasCollabService } from './canvas-collab.service';
 import { RedisModule } from '../../redis/redis.module';
+import { EmailModule } from '../email/email.module';
 
 @Module({
-    imports: [JwtModule.register({}), RedisModule],
+    imports: [JwtModule.register({}), RedisModule, EmailModule],
     controllers: [CanvasesController, CanvasSharesController],
     providers: [CanvasesService, CanvasSharesService, CanvasesGateway, CanvasCollabService],
     exports: [CanvasSharesService],

@@ -111,6 +111,7 @@ model User {
   attachments         Attachment[]
   documents           Document[]
   payments            Payment[]
+  bugReports          BugReport[]
 
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
@@ -581,6 +582,38 @@ model Payment {
   @@index([status])
   @@index([createdAt(sort: Desc)])
   @@map("payments")
+}
+
+// --- BUG REPORTS ---
+
+enum BugReportStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model BugReport {
+  id            String          @id @default(uuid())
+  userId        String?
+  user          User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  description   String          @db.Text
+  screenshotKey String?         // S3 key for screenshot
+
+  status        BugReportStatus @default(OPEN)
+
+  userEmail     String?         // Cached at submission time
+  userName      String?         // Cached at submission time
+
+  adminNote     String?         @db.Text
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("bug_reports")
 }
 
 // --- WEBHOOK LOGS (persistent audit trail for every Stripe event) ---

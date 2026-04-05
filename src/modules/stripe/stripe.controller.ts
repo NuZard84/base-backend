@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { PrismaService } from 'prisma/prisma.service';
 import { StripeService } from './stripe.service';
 import { STRIPE_EVENTS } from './stripe.constants';
+import { EmailService } from '../email/email.service';
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,7 @@ export class StripeController {
         private readonly stripeService: StripeService,
         private readonly prisma: PrismaService,
         private readonly config: ConfigService,
+        private readonly email: EmailService,
     ) {
         const entries: [string, PlanTier][] = [
             [config.get<string>('STRIPE_PRICE_STARTER', ''), PlanTier.STARTER],
@@ -418,6 +420,33 @@ export class StripeController {
             `invoice.paid: user=${user.id} plan=${plan} amount=${invoice.amount_paid} ` +
             `invoice=${invoice.id} trialCleared=${isPaidPlan}`,
         );
+
+        // Send subscription confirmation email (fire-and-forget)
+        if (isPaidPlan) {
+            const fullUser = await this.prisma.user.findUnique({
+                where: { id: user.id },
+                select: { email: true, name: true },
+            });
+            if (fullUser?.email) {
+                const amountDollars = invoice.amount_paid
+                    ? `$${(invoice.amount_paid / 100).toFixed(2)}`
+                    : '';
+                const nextBilling = periodEnd
+                    ? periodEnd.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                    : '';
+                const frontendUrl = this.config.get<string>('FRONTEND_URL', 'https://trydraft.app');
+
+                void this.email.sendSubscriptionConfirmation({
+                    toEmail: fullUser.email,
+                    userName: fullUser.name ?? 'there',
+                    planName: plan === PlanTier.PRO ? 'Pro' : 'Plus',
+                    amount: amountDollars,
+                    billingDate: nextBilling,
+                    manageUrl: frontendUrl,
+                });
+            }
+        }
+
         return user.id;
     }
 

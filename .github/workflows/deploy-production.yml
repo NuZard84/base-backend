@@ -76,7 +76,11 @@ jobs:
             --set-env-vars="STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}" \
             --set-env-vars="STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
             --set-env-vars="STRIPE_PRICE_PRO=${{ secrets.STRIPE_PRICE_PRO }}" \
-            --set-env-vars="STRIPE_PRICE_PLUS=${{ secrets.STRIPE_PRICE_PLUS }}"
+            --set-env-vars="STRIPE_PRICE_PLUS=${{ secrets.STRIPE_PRICE_PLUS }}" \
+            --set-env-vars="ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}" \
+            --set-env-vars="ADMIN_ALLOWED_ORIGINS=${{ secrets.ADMIN_ALLOWED_ORIGINS }}" \
+            --set-env-vars="RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" \
+            --set-env-vars="EMAIL_FROM=${{ secrets.EMAIL_FROM }}"
 
       - name: Show service URL
         run: |

@@ -78,12 +78,30 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   // CORS configuration
-  const frontendUrl = process.env.FRONTEND_URL;
-  const allowedOrigins = frontendUrl
-    ? frontendUrl.split(',').map((url) => url.trim())
-    : process.env.NODE_ENV === 'production'
-      ? []
-      : true; // Allow all in development
+  const isProd = process.env.NODE_ENV === 'production';
+  const frontendOrigins = (process.env.FRONTEND_URL ?? '')
+    .split(',').map(u => u.trim()).filter(Boolean);
+  const adminOrigins = (process.env.ADMIN_ALLOWED_ORIGINS ?? '')
+    .split(',').map(u => u.trim()).filter(Boolean);
+
+  // In dev, also allow admin.localhost on any port without requiring it in env
+  const devAdminOriginPattern = /^http:\/\/admin\.localhost(:\d+)?$/;
+
+  const allowedOrigins: string[] | ((origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => void) =
+    isProd
+      ? [...frontendOrigins, ...adminOrigins]
+      : (origin, callback) => {
+          // Allow requests with no origin (server-to-server, curl, etc.)
+          if (!origin) return callback(null, true);
+          if (
+            frontendOrigins.includes(origin) ||
+            adminOrigins.includes(origin) ||
+            devAdminOriginPattern.test(origin)
+          ) {
+            return callback(null, true);
+          }
+          callback(new Error(`CORS: origin "${origin}" not allowed`));
+        };
 
   app.enableCors({
     origin: allowedOrigins,

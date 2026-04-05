@@ -4,10 +4,12 @@ import {
     ForbiddenException,
     ConflictException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'prisma/prisma.service';
 import { CanvasRole, ShareStatus } from '@prisma/client';
 import { InviteCanvasDto } from './dto/invite-canvas.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
+import { EmailService } from '../../email/email.service';
 
 const ROLE_RANK: Record<CanvasRole, number> = {
     OWNER: 4,
@@ -18,7 +20,11 @@ const ROLE_RANK: Record<CanvasRole, number> = {
 
 @Injectable()
 export class CanvasSharesService {
-    constructor(private prisma: PrismaService) {}
+    constructor(
+        private prisma: PrismaService,
+        private email: EmailService,
+        private config: ConfigService,
+    ) {}
 
     /** Resolve the effective role of a user for a given canvas.
      *  Owner always returns OWNER regardless of shares.
@@ -77,11 +83,20 @@ export class CanvasSharesService {
         // Only OWNER or EDITOR can invite
         await this.ensureCanvasAccess(inviterUserId, canvasId, CanvasRole.EDITOR);
 
-        const canvas = await this.prisma.canvas.findUnique({
-            where: { id: canvasId },
-            select: { id: true, name: true, userId: true },
-        });
+        const [canvas, inviter] = await Promise.all([
+            this.prisma.canvas.findUnique({
+                where: { id: canvasId },
+                select: { id: true, name: true, userId: true },
+            }),
+            this.prisma.user.findUnique({
+                where: { id: inviterUserId },
+                select: { name: true, email: true },
+            }),
+        ]);
         if (!canvas) throw new NotFoundException('Canvas not found');
+
+        const frontendUrl = this.config.get<string>('FRONTEND_URL', 'https://trydraft.app');
+        const role = dto.role ?? CanvasRole.EDITOR;
 
         // Find invited user — normalize email to avoid case-mismatch misses
         const invitedUser = await this.prisma.user.findUnique({
@@ -90,12 +105,21 @@ export class CanvasSharesService {
         });
 
         if (!invitedUser) {
-            // User not registered — return a shareable link payload (no DB record created for non-users)
+            // User not registered — send invite-to-register email with canvas context
+            const registerLink = `${frontendUrl}/register?invite_canvas=${canvasId}&role=${role}&email=${encodeURIComponent(dto.email)}`;
+            void this.email.sendCollaborationInvite({
+                toEmail: dto.email,
+                inviterName: inviter?.name ?? 'Someone',
+                inviterEmail: inviter?.email ?? '',
+                canvasName: canvas.name ?? 'Untitled Canvas',
+                role,
+                inviteLink: registerLink,
+            });
             return {
                 type: 'link_only',
                 canvasId,
                 email: dto.email,
-                role: dto.role ?? CanvasRole.EDITOR,
+                role,
                 message: 'User not found. Share the invite link and they can join after registration.',
             };
         }
@@ -111,12 +135,12 @@ export class CanvasSharesService {
             create: {
                 canvasId,
                 userId: invitedUser.id,
-                role: dto.role ?? CanvasRole.EDITOR,
+                role,
                 status: ShareStatus.ACTIVE, // auto-accept for registered users
                 invitedBy: inviterUserId,
             },
             update: {
-                role: dto.role ?? CanvasRole.EDITOR,
+                role,
                 status: ShareStatus.ACTIVE,
                 invitedBy: inviterUserId,
                 acceptedAt: new Date(),
@@ -124,6 +148,17 @@ export class CanvasSharesService {
             include: {
                 user: { select: { id: true, email: true, name: true, image: true } },
             },
+        });
+
+        // Send invitation email (fire-and-forget — don't block the response)
+        const canvasLink = `${frontendUrl}/draw?canvas=${canvasId}`;
+        void this.email.sendCollaborationInvite({
+            toEmail: invitedUser.email,
+            inviterName: inviter?.name ?? 'Someone',
+            inviterEmail: inviter?.email ?? '',
+            canvasName: canvas.name ?? 'Untitled Canvas',
+            role,
+            inviteLink: canvasLink,
         });
 
         return {
