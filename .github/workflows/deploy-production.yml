@@ -71,7 +71,12 @@ jobs:
             --set-env-vars="ADMIN_PIN=${{ secrets.ADMIN_PIN }}" \
             --set-env-vars="ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}" \
             --set-env-vars="DATABASE_URL_DEV=${{ secrets.DATABASE_URL_DEV }}" \
-            --set-env-vars="DATABASE_URL_PROD=${{ secrets.DATABASE_URL_PROD }}"
+            --set-env-vars="DATABASE_URL_PROD=${{ secrets.DATABASE_URL_PROD }}" \
+            --set-env-vars="STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
+            --set-env-vars="STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}" \
+            --set-env-vars="STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+            --set-env-vars="STRIPE_PRICE_PRO=${{ secrets.STRIPE_PRICE_PRO }}" \
+            --set-env-vars="STRIPE_PRICE_PLUS=${{ secrets.STRIPE_PRICE_PLUS }}"
 
       - name: Show service URL
         run: |
