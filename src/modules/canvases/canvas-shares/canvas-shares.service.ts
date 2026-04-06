@@ -95,7 +95,7 @@ export class CanvasSharesService {
         ]);
         if (!canvas) throw new NotFoundException('Canvas not found');
 
-        const frontendUrl = this.config.get<string>('FRONTEND_URL', 'https://trydraft.app');
+        const frontendUrl = this.config.get<string>('FRONTEND_URL', 'https://trydraft.app').split(',')[0].trim();
         const role = dto.role ?? CanvasRole.EDITOR;
 
         // Find invited user — normalize email to avoid case-mismatch misses
