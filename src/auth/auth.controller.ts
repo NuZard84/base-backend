@@ -102,15 +102,5 @@ export class AuthController {
     return { success: true };
   }
 
-  @Post('guest')
-  @ApiOperation({ summary: 'Create a guest user and return tokens' })
-  @ApiResponse({ status: 201, description: 'Guest user created' })
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async createGuest(@Res({ passthrough: true }) res: Response) {
-    const { user, accessToken, refreshToken } = await this.authService.createGuestUser();
-
-    setRefreshCookie(res, refreshToken);
-
-    return { user, accessToken };
-  }
+  // Guest login removed — guest functionality is no longer supported
 }
