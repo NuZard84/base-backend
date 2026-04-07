@@ -36,7 +36,7 @@ export interface PlanDefinition {
   features: PlanFeatures;
 }
 
-// Models available on the FREE tier (Gemini 2.x and 2.5.x only)
+// Models available on the FREE tier (Gemini 2.x, 2.5.x, and 3.x)
 // Any model NOT in this set requires the advancedAiModels feature flag.
 export const FREE_TIER_AI_MODELS = new Set([
   'gemini-2.5-pro',
@@ -44,6 +44,9 @@ export const FREE_TIER_AI_MODELS = new Set([
   'gemini-2.5-flash-lite',
   'gemini-2.0-flash',
   'gemini-2.0-flash-lite',
+  'gemini-3-pro-preview',
+  'gemini-3-flash-preview',
+  'gemini-3.1-pro-preview',
 ]);
 
 // Resource types used in UsageLog for tracking
