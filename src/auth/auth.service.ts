@@ -3,10 +3,16 @@ import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { PrismaService } from 'prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
+import { RedisService } from 'src/redis/redis.service';
 import { v4 as uuidv4 } from 'uuid';
 
 const SLIDING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const HARD_CAP_MS = 90 * 24 * 60 * 60 * 1000;       // 90 days
+
+// One-time auth codes TTL: 60 seconds is generous enough for slow connections
+// but short enough that a leaked URL is useless after the user completes login.
+const AUTH_CODE_TTL_SECONDS = 60;
+const AUTH_CODE_REDIS_PREFIX = 'auth:code:';
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -15,6 +21,7 @@ export class AuthService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private redisService: RedisService,
     @InjectQueue('cleanup') private cleanupQueue: Queue,
   ) {}
 
@@ -84,7 +91,7 @@ export class AuthService implements OnModuleInit {
 
       const refreshToken = await this.createSession(user.id);
 
-      this.logger.log(`User authenticated: ${email}`);
+      this.logger.log(`User authenticated: ${user.id}`);
       return { user, accessToken, refreshToken };
     } catch (error) {
       this.logger.error('Error validating Google user:', error);
@@ -104,8 +111,31 @@ export class AuthService implements OnModuleInit {
 
     const now = new Date();
 
-    // Reuse detection: token exists in DB but already revoked — possible theft
+    // Reuse detection: token exists in DB but already revoked.
+    //
+    // Two scenarios produce this state:
+    //   A) Genuine token theft — the attacker reused a stolen token after the
+    //      legitimate user already rotated it. Revoke everything immediately.
+    //   B) Cross-tab race condition — two browser tabs simultaneously detected
+    //      an expired token and both called /refresh. The first tab succeeded
+    //      and rotated the token; the second tab's request arrives milliseconds
+    //      later carrying the now-revoked token. This is NOT theft.
+    //
+    // We distinguish them by checking how recently this session was revoked.
+    // During rotation we stamp lastUsedAt = now on the revoked row (see below).
+    // If the stamp is within the grace window it is almost certainly a race;
+    // we return a plain 401 so the frontend retries with the new cookie that
+    // the winning tab already set. Beyond the grace window it is treated as
+    // theft and all sessions for the user are revoked.
+    const CONCURRENT_GRACE_MS = 10_000; // 10 seconds
     if (session?.isRevoked) {
+      const timeSinceRevocation = now.getTime() - session.lastUsedAt.getTime();
+      if (timeSinceRevocation <= CONCURRENT_GRACE_MS) {
+        this.logger.warn(
+          `Concurrent refresh race detected for user ${session.userId} — returning 401 for retry`,
+        );
+        throw new UnauthorizedException('Session rotated — please retry');
+      }
       await this.prisma.session.updateMany({
         where: { userId: session.userId, isRevoked: false },
         data: { isRevoked: true },
@@ -136,10 +166,12 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Session reached maximum lifetime — please log in again');
     }
 
-    // Rotate: revoke old session, create new one
+    // Rotate: revoke old session, create new one.
+    // Stamp lastUsedAt = now so the concurrent-refresh grace-period check above
+    // can tell how recently this session was revoked (distinguishing a race from theft).
     await this.prisma.session.update({
       where: { id: session.id },
-      data: { isRevoked: true },
+      data: { isRevoked: true, lastUsedAt: now },
     });
 
     const newRefreshToken = uuidv4();
@@ -164,7 +196,7 @@ export class AuthService implements OnModuleInit {
       { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
     );
 
-    this.logger.log(`Token rotated for user: ${session.user.email}`);
+    this.logger.log(`Token rotated for user: ${session.user.id}`);
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
@@ -225,6 +257,39 @@ export class AuthService implements OnModuleInit {
 
     return token;
   }
+
+  // ── One-time auth code exchange ───────────────────────────────────────────
+  // After OAuth completes, the tokens are NOT passed through the browser URL.
+  // Instead the callback stores them in Redis under a short-lived opaque code
+  // and the Next.js set-session route exchanges the code server-to-server.
+  // This prevents tokens from ever appearing in browser history, server logs,
+  // or Referer headers.
+
+  async createAuthCode(payload: {
+    accessToken: string;
+    refreshToken: string;
+    user: object;
+  }): Promise<string> {
+    const code = uuidv4();
+    await this.redisService.set(
+      `${AUTH_CODE_REDIS_PREFIX}${code}`,
+      JSON.stringify(payload),
+      AUTH_CODE_TTL_SECONDS,
+    );
+    return code;
+  }
+
+  async exchangeAuthCode(
+    code: string,
+  ): Promise<{ accessToken: string; refreshToken: string; user: object }> {
+    const raw = await this.redisService.getdel(`${AUTH_CODE_REDIS_PREFIX}${code}`);
+    if (!raw) {
+      // Code not found — expired, already used, or forged
+      throw new UnauthorizedException('Invalid or expired auth code');
+    }
+    return JSON.parse(raw);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Called by BullMQ processor daily at 2 AM
   async cleanupRevokedSessions() {

@@ -72,6 +72,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return result === 1;
   }
 
+  // Atomically get-and-delete a key in a single round trip.
+  // Uses Redis GETDEL (Redis ≥ 6.2) with GET+DEL fallback for older servers.
+  // Critical for one-time-use tokens — prevents two concurrent callers from
+  // both successfully exchanging the same code.
+  async getdel(key: string): Promise<string | null> {
+    this.guard();
+    try {
+      return await (this.redis! as any).getdel(key);
+    } catch {
+      // Fallback: GET then DEL (not fully atomic but safe enough under normal load)
+      const value = await this.redis!.get(key);
+      if (value !== null) await this.redis!.del(key);
+      return value;
+    }
+  }
+
   // ── List operations (used for op-log) ────────────────────────────────────
 
   async rpush(key: string, ...values: string[]): Promise<number> {

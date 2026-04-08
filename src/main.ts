@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { SocketIoAdapter } from './adapters/socket-io.adapter';
 import { json, urlencoded } from 'express';
+import helmet from 'helmet';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const cookieParser = require('cookie-parser');
 
@@ -32,6 +33,12 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
+// JWT_SECRET must be at least 32 characters to prevent brute-force attacks on
+// the signing key. A short secret makes offline dictionary attacks trivial.
+if ((process.env.JWT_SECRET ?? '').length < 32) {
+  throw new Error('JWT_SECRET must be at least 32 characters long');
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   // Stripe webhooks need the raw Buffer body for signature verification.
@@ -49,6 +56,16 @@ async function bootstrap() {
     });
     req.on('error', next);
   });
+
+  // Security headers — applied before any other middleware so every response
+  // is covered (including error responses).
+  // content-security-policy is disabled here because the NestJS backend only
+  // serves JSON APIs + the Swagger UI; CSP belongs on the Next.js frontend.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // API-only server — CSP lives on the frontend
+    }),
+  );
 
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ limit: '10mb', extended: true }));

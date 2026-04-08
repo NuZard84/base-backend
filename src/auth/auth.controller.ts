@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Post,
@@ -15,14 +16,29 @@ import type { Response, Request } from 'express';
 
 const COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+// Centralised cookie options so every Set-Cookie and clearCookie call is
+// identical — mismatched attributes are the most common cause of cookies not
+// being sent or not being cleared in production.
+function refreshCookieOptions(isProduction: boolean) {
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    // SameSite=Lax is correct here because:
+    //   • The refresh cookie is set on the *frontend* domain (via Next.js proxy).
+    //   • All /api/auth/* requests go through the Next.js rewrite proxy on the
+    //     same origin, so they count as same-site and will include the cookie.
+    //   • SameSite=None (the previous value) was unnecessarily permissive and
+    //     opened the door to cross-site request abuse.
+    sameSite: 'lax' as const,
+    path: '/',
+  };
+}
+
 function setRefreshCookie(res: Response, token: string) {
   const isProduction = process.env.NODE_ENV === 'production';
   res.cookie('refreshToken', token, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
+    ...refreshCookieOptions(isProduction),
     maxAge: COOKIE_MAX_AGE_MS,
-    path: '/',
   });
 }
 
@@ -41,7 +57,7 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Google OAuth callback handler' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  googleCallback(@Req() req: any, @Res() res: Response) {
+  async googleCallback(@Req() req: any, @Res() res: Response) {
     const { user, accessToken, refreshToken } = req.user;
 
     // Resolve the correct frontend to redirect to: use the origin encoded in
@@ -57,15 +73,49 @@ export class AuthController {
         ? stateOrigin
         : allowedOrigins[0] || 'http://localhost:3000';
 
-    // Redirect to a Next.js API route that sets the httpOnly cookie on the
-    // frontend's origin, then continues to /auth/callback
+    // Store tokens in Redis under a short-lived one-time code.
+    // The frontend's /api/auth/set-session route will exchange this code
+    // server-to-server, so tokens NEVER appear in the browser URL,
+    // browser history, server logs, or Referer headers.
+    const code = await this.authService.createAuthCode({
+      accessToken,
+      refreshToken,
+      user,
+    });
+
+    // Only the opaque code + non-sensitive user JSON travel in the URL.
     const setSessionUrl =
       `${frontendUrl}/api/auth/set-session` +
-      `?at=${encodeURIComponent(accessToken)}` +
-      `&rt=${encodeURIComponent(refreshToken)}` +
+      `?code=${encodeURIComponent(code)}` +
       `&user=${encodeURIComponent(JSON.stringify(user))}`;
 
     return res.redirect(setSessionUrl);
+  }
+
+  // Called server-to-server by the Next.js /api/auth/set-session route handler.
+  // Exchanges the one-time code for tokens (atomic: code is deleted on first use).
+  // Returns only { user } — the refreshToken is set as an httpOnly cookie here
+  // so the set-session route can forward it without ever exposing it to JavaScript.
+  @Post('exchange-code')
+  @ApiOperation({ summary: 'Exchange one-time auth code for session tokens (server-to-server)' })
+  @ApiResponse({ status: 200, description: 'Tokens issued, refreshToken set as httpOnly cookie' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired auth code' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async exchangeCode(
+    @Body() body: { code: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (!body?.code) {
+      throw new UnauthorizedException('Auth code is required');
+    }
+
+    const { refreshToken, user } = await this.authService.exchangeAuthCode(body.code);
+
+    setRefreshCookie(res, refreshToken);
+
+    // The access token is NOT returned here — the browser will obtain it by
+    // calling POST /api/auth/refresh (which reads the httpOnly cookie we just set).
+    return { user };
   }
 
   @Post('refresh')
@@ -98,7 +148,10 @@ export class AuthController {
       await this.authService.logout(refreshToken);
     }
 
-    res.clearCookie('refreshToken', { path: '/' });
+    // Must use the same attributes that were used when setting the cookie —
+    // mismatched SameSite/Secure/Path is the most common reason clearCookie fails.
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.clearCookie('refreshToken', refreshCookieOptions(isProduction));
     return { success: true };
   }
 
