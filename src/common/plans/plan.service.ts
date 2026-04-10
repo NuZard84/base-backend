@@ -373,15 +373,17 @@ export class PlanService {
     aiRequests: UsageCount;
     imageGen: UsageCount;
     storageMb: UsageCount;
+    vizoraGen: UsageCount;
   }> {
     const plan = await this.getEffectivePlan(userId);
     const resetAt = this.getMonthEnd().toISOString();
 
-    const [projects, aiTokens, imageGen, storageMb] = await Promise.all([
+    const [projects, aiTokens, imageGen, storageMb, vizoraGen] = await Promise.all([
       this.countProjects(userId),
       this.countMonthlyAiTokens(userId),
       this.countMonthlyImageGen(userId),
       this.countStorageMb(userId),
+      this.countMonthlyVizora(userId),
     ]);
 
     return {
@@ -402,6 +404,11 @@ export class PlanService {
       storageMb: {
         current: storageMb,
         limit: plan.limits.maxStorageMb,
+      },
+      vizoraGen: {
+        current: vizoraGen,
+        limit: plan.limits.maxVizoraPerMonth,
+        resetAt,
       },
     };
   }
