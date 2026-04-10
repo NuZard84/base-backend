@@ -13,6 +13,8 @@ const NODE_TYPE_MAP: Record<string, NodeType> = {
     CommentNode: NodeType.COMMENT,
     NotesNode: NodeType.NOTES,
     YoutubeNode: NodeType.EMBED,
+    NapkinNode: NodeType.NAPKIN,
+    NapkinResponseNode: NodeType.NAPKIN_RESPONSE,
     default: NodeType.TEXT,
 };
 

@@ -10,6 +10,7 @@ export interface PlanLimits {
   maxStorageMb: number;
   maxNodesPerCanvas: number;
   maxCollaboratorsPerCanvas: number; // -1 = unlimited
+  maxVizoraPerMonth: number;
 }
 
 export interface PlanFeatures {
@@ -17,11 +18,11 @@ export interface PlanFeatures {
   customFlowExports: boolean;
   customAiPrompts: boolean;
   ragDocumentUpload: boolean;
-  apiAccess: boolean;
   advancedAiModels: boolean;
   imageGeneration: boolean;
   prioritySupport: boolean;
   importChat: boolean;
+  vizoraInfographic: boolean;
 }
 
 export interface PlanDefinition {
@@ -55,6 +56,7 @@ export const RESOURCE_TYPES = {
   IMAGE_GEN: 'image_gen',
   FILE_UPLOAD: 'file_upload',
   DOCUMENT_UPLOAD: 'document_upload',
+  VIZORA_GEN: 'vizora_gen',
 } as const;
 
 // Limit type identifiers used by @CheckLimit decorator
@@ -64,7 +66,8 @@ export type LimitType =
   | 'image_gen'
   | 'storage'
   | 'nodes_per_canvas'
-  | 'collaborators';
+  | 'collaborators'
+  | 'vizora_gen';
 
 // Feature keys used by @RequireFeature decorator
 export type FeatureKey = keyof PlanFeatures;
@@ -85,17 +88,19 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxStorageMb: 12,
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 2,
+      maxVizoraPerMonth: 0,
     },
     features: {
       collaboration: true,
       customFlowExports: false,
       customAiPrompts: false,
       ragDocumentUpload: false,
-      apiAccess: false,
+
       advancedAiModels: false,
       imageGeneration: true, // FREE gets 4/month (capped by maxImageGenPerMonth limit)
       prioritySupport: false,
       importChat: false,
+      vizoraInfographic: false,
     },
   },
 
@@ -114,17 +119,19 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxStorageMb: 12,               // SAME as FREE — no conflict when trial ends
       maxNodesPerCanvas: -1,          // unlimited — no conflict when trial ends
       maxCollaboratorsPerCanvas: 2,   // SAME as FREE — no conflict when trial ends
+      maxVizoraPerMonth: 2,
     },
     features: {
       collaboration: true,
       customFlowExports: false,
       customAiPrompts: false,
       ragDocumentUpload: false,
-      apiAccess: false,
+
       advancedAiModels: false,
       imageGeneration: true,
       prioritySupport: false,
       importChat: false,
+      vizoraInfographic: true,
     },
   },
 
@@ -143,17 +150,19 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxStorageMb: 5120, // 5 GB
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 10,
+      maxVizoraPerMonth: 50,
     },
     features: {
       collaboration: true,
       customFlowExports: true,
       customAiPrompts: true,
       ragDocumentUpload: true,
-      apiAccess: false,
+
       advancedAiModels: true,
       imageGeneration: true,
       prioritySupport: false,
       importChat: true,
+      vizoraInfographic: true,
     },
   },
 
@@ -172,17 +181,19 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxStorageMb: 20480, // 20 GB
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: -1,
+      maxVizoraPerMonth: 120,
     },
     features: {
       collaboration: true,
       customFlowExports: true,
       customAiPrompts: true,
       ragDocumentUpload: true,
-      apiAccess: true,
+
       advancedAiModels: true,
       imageGeneration: true,
       prioritySupport: true,
       importChat: true,
+      vizoraInfographic: true,
     },
   },
 };

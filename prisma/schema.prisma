@@ -43,6 +43,8 @@ enum NodeType {
   RESPONSE
   COMMENT
   NOTES
+  NAPKIN
+  NAPKIN_RESPONSE
 }
 
 enum EdgeType {

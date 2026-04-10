@@ -19,6 +19,7 @@ import { PlanModule } from './common/plans/plan.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StripeModule } from './modules/stripe/stripe.module';
 import { BugReportsModule } from './modules/bug-reports/bug-reports.module';
+import { NapkinModule } from './modules/napkin/napkin.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { BugReportsModule } from './modules/bug-reports/bug-reports.module';
     AdminModule,
     StripeModule,
     BugReportsModule,
+    NapkinModule,
   ],
   controllers: [AppController],
   providers: [

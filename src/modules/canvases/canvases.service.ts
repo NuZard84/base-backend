@@ -435,6 +435,18 @@ export class CanvasesService {
 
             // --- 2. Upsert all nodesUpdated in parallel (reduces latency from N round-trips to ~1) ---
             const clientIdToNodeId = new Map<string, string>();
+
+            // Pre-populate map with existing nodes so edge references to unmodified nodes resolve correctly.
+            // This is critical when only new child nodes (e.g. NapkinResponseNode) are in nodesUpdated
+            // but their parent (e.g. NapkinNode) already exists in the DB and isn't in this delta.
+            if (edgesAdd.length > 0) {
+                const existingNodes = await tx.node.findMany({
+                    where: { canvasId, clientId: { not: null } },
+                    select: { id: true, clientId: true },
+                });
+                existingNodes.forEach((n) => { if (n.clientId) clientIdToNodeId.set(n.clientId, n.id); });
+            }
+
             if (nodesArr.length > 0) {
                 const upsertResults = await Promise.all(
                     nodesArr.map(async (node) => {

@@ -153,6 +153,18 @@ export class PlanService {
     return result._sum.quantity ?? 0;
   }
 
+  async countMonthlyVizora(userId: string): Promise<number> {
+    const result = await this.prisma.usageLog.aggregate({
+      where: {
+        userId,
+        resourceType: RESOURCE_TYPES.VIZORA_GEN,
+        createdAt: { gte: this.getMonthStart() },
+      },
+      _sum: { quantity: true },
+    });
+    return result._sum.quantity ?? 0;
+  }
+
   async countStorageMb(userId: string): Promise<number> {
     const [attachments, documents] = await Promise.all([
       this.prisma.attachment.aggregate({
@@ -296,6 +308,23 @@ export class PlanService {
             current,
             limit,
             message: `This canvas has reached the collaborator limit (${current}/${limit}). Upgrade for more collaborators.`,
+          });
+        }
+        break;
+      }
+
+      case 'vizora_gen': {
+        const limit = plan.limits.maxVizoraPerMonth;
+        if (limit === -1) return;
+        const current = await this.countMonthlyVizora(userId);
+        if (current >= limit) {
+          throw new ForbiddenException({
+            code: 'PLAN_LIMIT_EXCEEDED',
+            limitType: 'vizora_gen',
+            current,
+            limit,
+            resetAt: this.getMonthEnd().toISOString(),
+            message: `You've used all your Vizora Infographic Visuals this month (${current}/${limit}). Resets on ${this.getMonthEnd().toLocaleDateString()}.`,
           });
         }
         break;

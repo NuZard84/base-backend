@@ -307,6 +307,29 @@ Follow this layout for all non-trivial queries:
     }
 
     /**
+     * Generates plain structured text using a custom system prompt.
+     * Used by NapkinService to expand vague user input into rich, structure-specific
+     * content before sending to the Napkin visual AI.
+     * Deliberately bypasses `aiInstruction` so the output has NO markdown formatting.
+     * Falls back silently to `userText` so Napkin generation never fails.
+     */
+    async expandForVisual(systemPrompt: string, userText: string): Promise<string> {
+        if (!this.genAI) return userText;
+        try {
+            const response = await this.genAI.models.generateContent({
+                model: 'gemini-2.0-flash-lite', // cheapest + fastest; ~1-2s latency
+                contents: [{ role: 'user', parts: [{ text: userText }] }],
+                config: { systemInstruction: systemPrompt },
+            });
+            const result = response.text?.trim();
+            return result || userText;
+        } catch (err) {
+            this.logger.warn(`expandForVisual failed (falling back to raw text): ${err?.message}`);
+            return userText;
+        }
+    }
+
+    /**
      * Fetches real-time data from the internet using Gemini's Google Search Grounding.
      * @param prompt - The search prompt / question to answer with live data.
      */
