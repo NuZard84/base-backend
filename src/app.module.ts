@@ -2,8 +2,13 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import type IORedis from 'ioredis';
+import {
+  BullConnectionModule,
+  BULL_REDIS_CONNECTION,
+} from './redis/bull-connection.module';
 import { AuthModule } from './auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { HealthModule } from './health/health.module';
@@ -24,17 +29,15 @@ import { NapkinModule } from './modules/napkin/napkin.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    // BullMQ root: shared Redis connection for all queues
+    // Shared IORedis instance with BullMQ-required options (maxRetriesPerRequest: null).
+    // Must be listed before BullModule so the token is available for injection.
+    BullConnectionModule,
+    // BullMQ root: all queues share the single connection from BullConnectionModule,
+    // reducing BullMQ connections from 12 (4 queues × 3) down to 1 shared + 4 blocking.
     BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: config.get<number>('REDIS_PORT', 6379),
-          password: config.get<string>('REDIS_PASSWORD') || undefined,
-          username: config.get<string>('REDIS_USERNAME') || undefined,
-        },
-      }),
+      imports: [BullConnectionModule],
+      inject: [BULL_REDIS_CONNECTION],
+      useFactory: (connection: IORedis) => ({ connection }),
     }),
     ThrottlerModule.forRoot([
       {

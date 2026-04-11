@@ -70,9 +70,11 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
         this.flushTimer = setInterval(() => void this.flushAll(), FLUSH_INTERVAL_MS);
     }
 
-    onModuleDestroy() {
+    async onModuleDestroy() {
         if (this.flushTimer) clearInterval(this.flushTimer);
-        void this.flushAll();
+        // Await so Cloud Run's SIGTERM handler doesn't exit before pending DB
+        // writes are flushed — prevents data loss on graceful shutdown.
+        await this.flushAll();
     }
 
     // ── Op sequencing ─────────────────────────────────────────────────────────

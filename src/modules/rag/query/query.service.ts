@@ -287,6 +287,11 @@ export class QueryService {
   }
 
   private sseEvent(data: StreamChunk): MessageEvent {
-    return { data: JSON.stringify(data) } as MessageEvent;
+    // Pass the object directly — NestJS @Sse() calls JSON.stringify(event.data)
+    // internally. Pre-serialising to a string caused double-encoding:
+    //   SSE line → data: "{\"type\":\"done\"...}"   ← outer quotes from JSON.stringify(string)
+    //   JSON.parse → returns a string, not an object
+    //   chunk.type → undefined → switch never matched → node stuck forever
+    return { data } as MessageEvent;
   }
 }

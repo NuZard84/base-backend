@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as path from 'path';
 import { pathToFileURL } from 'url';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
@@ -6,6 +7,18 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 // Use pathToFileURL to convert filesystem path to ESM-compatible file:// URL
 pdfjsLib.GlobalWorkerOptions.workerSrc = pathToFileURL(
   require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+).href;
+
+// Resolve the standard_fonts directory bundled with pdfjs-dist so that pdfjs
+// can load font metrics for PDFs that reference standard Type 1 fonts
+// (Helvetica, Times-Roman, Courier, etc.). Without this, pdfjs logs a warning
+// for every such PDF and falls back to less accurate width tables.
+const PDFJS_STANDARD_FONT_URL = pathToFileURL(
+  path.join(
+    path.dirname(require.resolve('pdfjs-dist/package.json')),
+    'standard_fonts',
+    path.sep, // trailing slash — pdfjs appends filenames directly
+  ),
 ).href;
 
 export interface PdfResult {
@@ -21,7 +34,10 @@ export class PdfProcessorHelper {
     this.logger.log(`Extracting text from PDF: ${filename}`);
 
     const data = new Uint8Array(buffer);
-    const doc = await pdfjsLib.getDocument({ data }).promise;
+    const doc = await pdfjsLib.getDocument({
+      data,
+      standardFontDataUrl: PDFJS_STANDARD_FONT_URL,
+    }).promise;
 
     const pages: string[] = [];
     for (let i = 1; i <= doc.numPages; i++) {

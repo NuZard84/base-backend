@@ -33,6 +33,15 @@ function isFullSync(dto: SyncCanvasDto): boolean {
     return dto.nodes !== undefined && dto.edges !== undefined;
 }
 
+/** True when the payload carries only viewport position — no node/edge changes. */
+function isViewportOnly(dto: SyncCanvasDto): boolean {
+    return (
+        !hasDeltaPayload(dto) &&
+        !isFullSync(dto) &&
+        (dto.viewportX != null || dto.viewportY != null || dto.viewportZoom != null)
+    );
+}
+
 @Injectable()
 export class CanvasesService {
     private readonly logger = new Logger(CanvasesService.name);
@@ -226,6 +235,20 @@ export class CanvasesService {
             result = await this.runFullSync(userId, canvasId, dto);
         } else if (hasDeltaPayload(dto)) {
             result = await this.runDeltaSync(userId, canvasId, dto);
+        } else if (isViewportOnly(dto)) {
+            // Viewport-only update — no node/edge changes to process.
+            // Happens when the client has no delta baseline (e.g. first save
+            // after the last node is deleted). Persist the viewport position
+            // and return early without broadcasting (nothing changed for peers).
+            await this.prisma.canvas.update({
+                where: { id: canvasId },
+                data: {
+                    viewportX: dto.viewportX ?? undefined,
+                    viewportY: dto.viewportY ?? undefined,
+                    viewportZoom: dto.viewportZoom ?? undefined,
+                },
+            });
+            return { viewport: { viewportX: dto.viewportX, viewportY: dto.viewportY, viewportZoom: dto.viewportZoom } };
         } else {
             throw new BadRequestException(
                 'Either nodes+edges (full sync) or nodesUpdated/nodesDeleted/edgesAdded/edgesDeleted (delta sync) required',

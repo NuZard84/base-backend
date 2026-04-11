@@ -11,7 +11,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private redis: Redis | null = null;
   private readonly logger = new Logger(RedisService.name);
 
-  onModuleInit() {
+  async onModuleInit() {
     const host = process.env.REDIS_HOST;
     const port = process.env.REDIS_PORT;
     if (!host || !port) {
@@ -25,14 +25,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       host,
       port: Number(port),
       ...(username ? { username } : {}),
-      password: process.env.REDIS_PASSWORD,
-      retryStrategy: (times) => Math.min(times * 50, 2000),
-      connectTimeout: 5000,
-      maxRetriesPerRequest: 2,
+      password: process.env.REDIS_PASSWORD || undefined,
+      // Exponential backoff up to 5 s; give up after 10 consecutive failures
+      retryStrategy: (times) => {
+        if (times > 10) return null;
+        return Math.min(times * 200, 5_000);
+      },
+      connectTimeout: 10_000,
+      // Abort commands that take too long rather than letting them hang
+      commandTimeout: 5_000,
+      maxRetriesPerRequest: 3,
+      // Don't silently queue commands while disconnected — surface errors immediately
+      enableOfflineQueue: false,
+      // Don't open the socket until the first command is issued
+      lazyConnect: true,
+      // TCP keepalive — detect stale half-open connections before Redis Cloud closes them
+      keepAlive: 30_000,
     });
 
     this.redis.on('connect', () => this.logger.log('Redis connected'));
     this.redis.on('error', (err) => this.logger.error('Redis error:', err));
+    this.redis.on('close', () => this.logger.warn('Redis connection closed'));
+    this.redis.on('reconnecting', () => this.logger.log('Redis reconnecting…'));
+
+    // Explicitly connect now that listeners are attached, so errors during
+    // initial handshake are captured by the 'error' handler above.
+    await this.redis.connect();
   }
 
   private guard() {
@@ -105,9 +123,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.redis!.ltrim(key, start, stop);
   }
 
-  onModuleDestroy() {
+  async onModuleDestroy() {
     if (this.redis) {
-      this.redis.quit();
+      // Graceful quit flushes pending commands; fall back to immediate disconnect
+      // if Redis is already unreachable (e.g. during a crash or forced shutdown).
+      await this.redis.quit().catch(() => this.redis!.disconnect());
       this.logger.log('Redis disconnected');
     }
   }
