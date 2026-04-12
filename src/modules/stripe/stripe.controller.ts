@@ -59,6 +59,11 @@ export class StripeController {
         this.priceToTier = new Map(entries.filter(([k]) => k));
         this.tierToPrice = new Map(entries.filter(([k]) => k).map(([k, v]) => [v, k]));
 
+        // Internal beta plan — hardcoded price, maps to PLUS tier on fulfillment
+        const BETA_PRICE_ID = 'price_1TLFxOIo7dO2UuLaR94wZe2v';
+        this.tierToPrice.set('BETA', BETA_PRICE_ID);
+        this.priceToTier.set(BETA_PRICE_ID, PlanTier.PLUS);
+
         this.logger.log(
             `Stripe price map: ${[...this.priceToTier.entries()].map(([k, v]) => `${k}→${v}`).join(', ') || '(none — set STRIPE_PRICE_PLUS / STRIPE_PRICE_PRO in env)'}`,
         );
@@ -81,7 +86,12 @@ export class StripeController {
     async createCheckout(@Req() req, @Body() body: CreateCheckoutDto) {
         const { userId, email } = req.user;
 
-        const priceId = this.tierToPrice.get(body.tier.toUpperCase());
+        // Hardcoded beta test product — one live price, no env var needed
+        const BETA_PRICE_ID = 'price_1TLFxOIo7dO2UuLaR94wZe2v';
+        const priceId = body.tier.toUpperCase() === 'BETA'
+            ? BETA_PRICE_ID
+            : this.tierToPrice.get(body.tier.toUpperCase());
+
         if (!priceId) {
             throw new BadRequestException(
                 `No Stripe price configured for tier: ${body.tier}. Set STRIPE_PRICE_${body.tier.toUpperCase()} in env.`,
