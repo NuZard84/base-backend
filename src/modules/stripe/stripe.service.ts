@@ -32,6 +32,8 @@ export interface CreateCheckoutSessionInput {
     trialPeriodDays?: number;
     /** Arbitrary metadata stored on the session (e.g. planTier) */
     metadata?: Record<string, string>;
+    /** 'subscription' (default) or 'payment' for one-time products */
+    mode?: 'subscription' | 'payment';
 }
 
 export interface CreateCheckoutSessionResult {
@@ -145,6 +147,7 @@ export class StripeService implements OnModuleInit {
             stripeCustomerId,
             trialPeriodDays,
             metadata = {},
+            mode = 'subscription',
         } = input;
 
         if (!priceId) {
@@ -158,21 +161,35 @@ export class StripeService implements OnModuleInit {
             stripeCustomerId,
         );
 
+        const sessionParams: Parameters<typeof this.stripe.checkout.sessions.create>[0] =
+            mode === 'payment'
+                ? {
+                      mode: 'payment',
+                      customer: customer.id,
+                      line_items: [{ price: priceId, quantity: 1 }],
+                      success_url: successUrl,
+                      cancel_url: cancelUrl,
+                      metadata: { userId, ...metadata },
+                      allow_promotion_codes: true,
+                      billing_address_collection: 'auto',
+                  }
+                : {
+                      mode: 'subscription',
+                      customer: customer.id,
+                      line_items: [{ price: priceId, quantity: 1 }],
+                      success_url: successUrl,
+                      cancel_url: cancelUrl,
+                      subscription_data: {
+                          metadata: { userId, ...metadata },
+                          ...(trialPeriodDays ? { trial_period_days: trialPeriodDays } : {}),
+                      },
+                      metadata: { userId, ...metadata },
+                      allow_promotion_codes: true,
+                      billing_address_collection: 'auto',
+                  };
+
         const session = await this.stripe.checkout.sessions.create(
-            {
-                mode: 'subscription',
-                customer: customer.id,
-                line_items: [{ price: priceId, quantity: 1 }],
-                success_url: successUrl,
-                cancel_url: cancelUrl,
-                subscription_data: {
-                    metadata: { userId, ...metadata },
-                    ...(trialPeriodDays ? { trial_period_days: trialPeriodDays } : {}),
-                },
-                metadata: { userId, ...metadata },
-                allow_promotion_codes: true,
-                billing_address_collection: 'auto',
-            },
+            sessionParams,
             { idempotencyKey: `checkout-${userId}-${priceId}-${Date.now()}` },
         );
 

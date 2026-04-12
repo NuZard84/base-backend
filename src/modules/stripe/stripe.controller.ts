@@ -113,6 +113,7 @@ export class StripeController {
             cancelUrl: body.cancelUrl,
             stripeCustomerId: user.stripeId ?? undefined,
             trialPeriodDays: body.trialPeriodDays,
+            mode: body.tier.toUpperCase() === 'BETA' ? 'payment' : 'subscription',
         });
     }
 
