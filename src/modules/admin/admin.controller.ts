@@ -68,10 +68,12 @@ export class AdminController implements OnModuleInit {
     @Body('pin') pin: string,
     @Req() req: Request,
   ) {
-    const ip =
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-      req.ip ??
-      'unknown';
+    // Take the LAST IP in x-forwarded-for — that's the one appended by our
+    // trusted load balancer (Cloud Run), not the client-controlled first entry.
+    // Using the first IP lets attackers bypass the lockout by spoofing the header.
+    const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+    const forwardedIps = forwarded?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
+    const ip = forwardedIps[forwardedIps.length - 1] ?? req.ip ?? 'unknown';
     const redisKey = `admin:pin_attempts:${ip}`;
 
     // ── Check existing lockout ───────────────────────────────────────────────
@@ -120,6 +122,24 @@ export class AdminController implements OnModuleInit {
     const secret = this.config.get<string>('ADMIN_JWT_SECRET', 'admin-secret-dev');
     const token = jwt.sign({ admin: true }, secret, { expiresIn: '8h' });
     return { token };
+  }
+
+  // ─── Maintenance ────────────────────────────────────────────────────────────
+
+  /**
+   * Trigger revoked-session cleanup manually.
+   * Hit by Cloud Scheduler (or ops team) so cleanup runs even if the BullMQ
+   * in-process job missed its window after a Cloud Run restart.
+   *
+   * Cloud Scheduler target: POST https://<backend-url>/admin/maintenance/cleanup
+   * Add Authorization: Bearer <admin-token> header (same token as admin panel).
+   */
+  @Post('maintenance/cleanup')
+  @UseGuards(AdminGuard)
+  async triggerCleanup() {
+    const result = await this.adminService.cleanupRevokedSessions();
+    this.logger.log(`Manual cleanup: deleted ${result.deletedCount} revoked sessions`);
+    return result;
   }
 
   // ─── Analytics ───────────────────────────────────────────────────────────────

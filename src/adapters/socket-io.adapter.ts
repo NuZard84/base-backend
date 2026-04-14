@@ -2,6 +2,8 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { INestApplication } from '@nestjs/common';
 import type { ServerOptions } from 'socket.io';
 import type { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 
 /**
  * Custom Socket.IO adapter that applies server-level configuration correctly.
@@ -17,6 +19,13 @@ import type { Server } from 'socket.io';
  *   "Invalid namespace" for every non-default namespace.
  * - Cloud Run terminates idle HTTP connections at 60 s; pingInterval must be
  *   shorter than that to keep WebSocket connections alive.
+ *
+ * Redis adapter:
+ * - Attaches @socket.io/redis-adapter when REDIS_HOST is configured.
+ * - Enables multi-instance WebSocket broadcasting — if Cloud Run scales beyond
+ *   1 instance, users on different instances can still receive each other's ops.
+ * - Uses two separate IORedis clients (pub + sub) as required by the adapter.
+ * - Gracefully skips adapter setup if Redis is not configured (dev / no-Redis env).
  */
 export class SocketIoAdapter extends IoAdapter {
     private readonly corsOrigin: string[] | boolean;
@@ -52,6 +61,38 @@ export class SocketIoAdapter extends IoAdapter {
             pingInterval: 25000,
             pingTimeout: 20000,
         }) as Server;
+
+        // Attach Redis pub/sub adapter for multi-instance WebSocket support.
+        // Requires two separate Redis clients — the sub client enters subscribe
+        // mode and can no longer issue regular commands, so it must be isolated.
+        const redisHost = process.env.REDIS_HOST;
+        const redisPort = parseInt(process.env.REDIS_PORT ?? '6379', 10);
+        const redisPassword = process.env.REDIS_PASSWORD || undefined;
+        const redisUsername = process.env.REDIS_USERNAME || undefined;
+
+        if (redisHost) {
+            // Pub/sub clients must NOT use lazyConnect or disableOfflineQueue.
+            // The Redis adapter calls psubscribe immediately after creation —
+            // lazyConnect delays the connection so the socket isn't open yet,
+            // and enableOfflineQueue:false then rejects the command outright.
+            // Let them connect eagerly and queue commands while connecting.
+            const redisOpts = {
+                host: redisHost,
+                port: redisPort,
+                ...(redisPassword && { password: redisPassword }),
+                ...(redisUsername && { username: redisUsername }),
+                retryStrategy: (times: number) => Math.min(times * 200, 5_000),
+                connectTimeout: 10_000,
+                keepAlive: 30_000,
+            };
+            const pubClient = new Redis(redisOpts);
+            const subClient = pubClient.duplicate();
+
+            pubClient.on('error', (err) => console.error('[Socket.IO Redis pub]', err));
+            subClient.on('error', (err) => console.error('[Socket.IO Redis sub]', err));
+
+            this.cachedServer.adapter(createAdapter(pubClient, subClient));
+        }
 
         return this.cachedServer;
     }

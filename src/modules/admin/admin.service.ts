@@ -466,6 +466,22 @@ export class AdminService {
     return { tier, reset: true };
   }
 
+  // ─── Maintenance ─────────────────────────────────────────────────────────────
+
+  /**
+   * Delete revoked sessions older than 7 days.
+   * Exposed via POST /admin/maintenance/cleanup so Cloud Scheduler can trigger
+   * this externally — ensures it runs even if the in-process BullMQ job misses
+   * its window (e.g. after a Cloud Run restart at 2 AM).
+   */
+  async cleanupRevokedSessions(): Promise<{ deletedCount: number }> {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1_000);
+    const result = await this.prisma.session.deleteMany({
+      where: { isRevoked: true, createdAt: { lt: sevenDaysAgo } },
+    });
+    return { deletedCount: result.count };
+  }
+
   // ─── App Config ─────────────────────────────────────────────────────────────
 
   async getAppConfig(): Promise<Record<string, string>> {

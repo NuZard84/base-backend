@@ -584,12 +584,17 @@ export class CanvasesService {
             throw new NotFoundException(`Canvas with ID ${id} not found`);
         }
 
-        // Notify peers BEFORE deletion so the room still exists to receive the event
-        this.canvasesGateway.broadcastCanvasDeleted(id, userId);
-
-        return this.prisma.canvas.delete({
+        const deleted = await this.prisma.canvas.delete({
             where: { id },
         });
+
+        // Broadcast only after successful DB delete — avoids false deletion
+        // events if the delete throws (FK constraint, Neon timeout, etc.).
+        // Peers can still receive the event even after the room dissolves
+        // because we emit to the room name directly via server.to().
+        this.canvasesGateway.broadcastCanvasDeleted(id, userId);
+
+        return deleted;
     }
 
     private async ensureCanvasOwnership(userId: string, canvasId: string): Promise<void> {

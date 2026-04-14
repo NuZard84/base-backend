@@ -86,7 +86,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxAiTokensPerMonth: 50_000,
       maxImageGenPerMonth: 4,
       maxStorageMb: 12,
-      maxNodesPerCanvas: -1,
+      maxNodesPerCanvas: 250,  // cap prevents a free user from OOM-ing the Cloud Run instance
       maxCollaboratorsPerCanvas: 2,
       maxVizoraPerMonth: 0,
     },

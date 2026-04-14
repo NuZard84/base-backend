@@ -231,6 +231,19 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         // Reject ops from sockets that never successfully joined this canvas room
         if (!(client.data.canvasIds as Set<string>).has(canvasId)) return;
 
+        // Per-socket rate limit: max 30 ops/sec to prevent flooding the server.
+        // Node drag fires at ~60fps — this still allows fluid collaboration while
+        // blocking malicious or runaway clients from exhausting Redis + DB resources.
+        const now = Date.now();
+        const windowResetAt = (client.data.opWindowResetAt as number | undefined) ?? 0;
+        if (now >= windowResetAt) {
+            client.data.opWindowCount = 0;
+            client.data.opWindowResetAt = now + 1_000;
+        }
+        const opCount = ((client.data.opWindowCount as number | undefined) ?? 0) + 1;
+        client.data.opWindowCount = opCount;
+        if (opCount > 30) return; // drop silently — client reconciles on next HTTP sync
+
         // Assign server sequence number (Redis INCR, non-blocking on failure)
         const serverSeq = await this.collabService.nextSeq(canvasId);
 
