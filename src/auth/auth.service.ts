@@ -242,11 +242,25 @@ export class AuthService implements OnModuleInit {
     });
     const trialDays = configRow ? parseInt(configRow.value, 10) : 14;
 
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000')
+      .split(',')[0]
+      .trim();
+
+    const AVATARS = [
+      'https://0mtz1m6rci3cbssu.public.blob.vercel-storage.com/avatar.png',
+      'https://0mtz1m6rci3cbssu.public.blob.vercel-storage.com/avatar2.png',
+      'https://0mtz1m6rci3cbssu.public.blob.vercel-storage.com/avatar3.png',
+      'https://0mtz1m6rci3cbssu.public.blob.vercel-storage.com/avatar4.png',
+      'https://0mtz1m6rci3cbssu.public.blob.vercel-storage.com/avatar5.png',
+    ];
+    const image = AVATARS[Math.floor(Math.random() * AVATARS.length)];
+
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
         name: dto.name || dto.email.split('@')[0],
         passwordHash,
+        image,
         emailVerified: false,
         verifyToken,
         verifyTokenExpiry,
@@ -254,10 +268,6 @@ export class AuthService implements OnModuleInit {
         trialTier: 'STARTER',
       },
     });
-
-    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000')
-      .split(',')[0]
-      .trim();
     const verifyUrl = `${frontendUrl}/auth/verify-email?token=${verifyToken}`;
 
     void this.emailService.sendEmailVerification({
