@@ -12,6 +12,12 @@ import { AuthService } from './auth.service';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { GoogleAuthGuard } from './google/google-auth.guard';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import type { Response, Request } from 'express';
 
 const COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -154,6 +160,67 @@ export class AuthController {
     res.clearCookie('refreshToken', refreshCookieOptions(isProduction));
     return { success: true };
   }
+
+  // ── Email / Password Auth ─────────────────────────────────────────────────
+
+  @Post('register')
+  @ApiOperation({ summary: 'Register a new account with email and password' })
+  @ApiResponse({ status: 201, description: 'Registration successful; verification email sent' })
+  @ApiResponse({ status: 409, description: 'Email already in use' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
+  }
+
+  @Post('login')
+  @ApiOperation({ summary: 'Login with email and password' })
+  @ApiResponse({ status: 201, description: 'Login successful; returns one-time code for session exchange' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  @ApiResponse({ status: 403, description: 'Email not verified' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async login(@Body() dto: LoginDto) {
+    // Returns { code, user } — frontend navigates to /api/auth/set-session?code=...
+    // to exchange for an httpOnly refresh cookie (same flow as Google OAuth).
+    return this.authService.loginWithPassword(dto);
+  }
+
+  @Post('verify-email')
+  @ApiOperation({ summary: 'Verify email address using token from verification email' })
+  @ApiResponse({ status: 201, description: 'Email verified; returns one-time code for auto-login' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired token' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    // Returns { code, user } — frontend navigates to /api/auth/set-session?code=...
+    // for auto-login after verification.
+    return this.authService.verifyEmail(dto.token);
+  }
+
+  @Post('resend-verification')
+  @ApiOperation({ summary: 'Resend email verification link' })
+  @ApiResponse({ status: 201, description: 'Response is always generic to prevent user enumeration' })
+  @Throttle({ default: { limit: 3, ttl: 300000 } })
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    return this.authService.resendVerification(dto.email);
+  }
+
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Request a password reset link by email' })
+  @ApiResponse({ status: 201, description: 'Always generic — prevents user enumeration' })
+  @Throttle({ default: { limit: 3, ttl: 300000 } })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password using token from email link' })
+  @ApiResponse({ status: 201, description: 'Password reset; all sessions revoked' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired token' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.password);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Guest login removed — guest functionality is no longer supported
 }

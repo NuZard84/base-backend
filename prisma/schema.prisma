@@ -115,6 +115,16 @@ model User {
   payments            Payment[]
   bugReports          BugReport[]
 
+  // Email/password auth fields (null for Google-only users)
+  passwordHash      String?
+  emailVerified     Boolean   @default(false)
+  verifyToken       String?   @unique
+  verifyTokenExpiry DateTime?
+
+  // Password reset (1-hour token, cleared on use)
+  resetToken        String?   @unique
+  resetTokenExpiry  DateTime?
+
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

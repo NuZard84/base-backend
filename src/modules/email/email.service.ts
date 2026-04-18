@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
 import { collaborationInviteTemplate } from './templates/collaboration-invite.template';
 import { subscriptionConfirmTemplate } from './templates/subscription-confirm.template';
+import { emailVerifyTemplate, EmailVerifyInput } from './templates/email-verify.template';
+import { passwordResetTemplate, PasswordResetInput } from './templates/password-reset.template';
 
 export interface SendCollabInviteInput {
     toEmail: string;
@@ -69,6 +71,40 @@ export class EmailService {
             );
         } else {
             this.logger.log(`Subscription confirmation sent to ${toEmail} (plan: ${planName})`);
+        }
+    }
+
+    async sendEmailVerification(input: EmailVerifyInput): Promise<void> {
+        const { toEmail, userName } = input;
+
+        const { error } = await this.resend.emails.send({
+            from: this.fromAddress,
+            to: toEmail,
+            subject: 'Verify your TryDraft email address',
+            html: emailVerifyTemplate(input),
+        });
+
+        if (error) {
+            this.logger.warn(`Failed to send verify email to ${toEmail}: ${error.message}`);
+        } else {
+            this.logger.log(`Email verification sent to ${toEmail} (user: ${userName})`);
+        }
+    }
+
+    async sendPasswordReset(input: PasswordResetInput): Promise<void> {
+        const { toEmail, userName } = input;
+
+        const { error } = await this.resend.emails.send({
+            from: this.fromAddress,
+            to: toEmail,
+            subject: 'Reset your TryDraft password',
+            html: passwordResetTemplate(input),
+        });
+
+        if (error) {
+            this.logger.warn(`Failed to send password reset to ${toEmail}: ${error.message}`);
+        } else {
+            this.logger.log(`Password reset email sent to ${toEmail} (user: ${userName})`);
         }
     }
 }

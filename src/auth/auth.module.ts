@@ -9,6 +9,7 @@ import { RedisModule } from 'src/redis/redis.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { CleanupProcessor } from './cleanup.processor';
+import { EmailModule } from 'src/modules/email/email.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CleanupProcessor } from './cleanup.processor';
     BullModule.registerQueue({
       name: 'cleanup',
     }),
+    EmailModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, GoogleStrategy, JwtStrategy, CleanupProcessor],

@@ -1,10 +1,27 @@
-import { Injectable, Logger, UnauthorizedException, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  UnauthorizedException,
+  OnModuleInit,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { PrismaService } from 'prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { RedisService } from 'src/redis/redis.service';
+import { EmailService } from 'src/modules/email/email.service';
 import { v4 as uuidv4 } from 'uuid';
+import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+
+// Pre-computed bcrypt hash used when a user is not found or has no password.
+// Ensures loginWithPassword always runs a full bcrypt comparison so timing
+// attacks cannot distinguish "wrong password" from "email not found".
+const DUMMY_HASH = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TqznbMGjxHFPQ7t2TNJNJblZFIly';
 
 const SLIDING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const HARD_CAP_MS = 90 * 24 * 60 * 60 * 1000;       // 90 days
@@ -22,6 +39,7 @@ export class AuthService implements OnModuleInit {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private redisService: RedisService,
+    private emailService: EmailService,
     @InjectQueue('cleanup') private cleanupQueue: Queue,
   ) {}
 
@@ -68,6 +86,7 @@ export class AuthService implements OnModuleInit {
             name: profile.displayName || email.split('@')[0] || null,
             image: profile.photos?.[0]?.value || null,
             googleId: profile.id,
+            emailVerified: true, // Google has already verified the email
             lastLoginAt: new Date(),
             trialEndsAt: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
             trialTier: 'STARTER',
@@ -78,6 +97,7 @@ export class AuthService implements OnModuleInit {
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
+            emailVerified: true, // idempotent backfill for pre-existing Google users
             lastLoginAt: new Date(),
             image: profile.photos?.[0]?.value || user.image,
           },
@@ -92,7 +112,7 @@ export class AuthService implements OnModuleInit {
       const refreshToken = await this.createSession(user.id);
 
       this.logger.log(`User authenticated: ${user.id}`);
-      return { user, accessToken, refreshToken };
+      return { user: this.sanitizeUser(user), accessToken, refreshToken };
     } catch (error) {
       this.logger.error('Error validating Google user:', error);
       throw error;
@@ -199,6 +219,302 @@ export class AuthService implements OnModuleInit {
     this.logger.log(`Token rotated for user: ${session.user.id}`);
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
+
+  // ── Email / Password Auth ─────────────────────────────────────────────────
+
+  async register(dto: RegisterDto): Promise<{ message: string }> {
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+
+    if (existing) {
+      if (existing.googleId && !existing.passwordHash) {
+        throw new ConflictException(
+          'This email is linked to a Google account. Please sign in with Google.',
+        );
+      }
+      throw new ConflictException('An account with this email already exists.');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const { token: verifyToken, expiry: verifyTokenExpiry } = this.generateVerifyToken();
+
+    const configRow = await this.prisma.appConfig.findUnique({
+      where: { key: 'default_trial_days' },
+    });
+    const trialDays = configRow ? parseInt(configRow.value, 10) : 14;
+
+    const user = await this.prisma.user.create({
+      data: {
+        email: dto.email,
+        name: dto.name || dto.email.split('@')[0],
+        passwordHash,
+        emailVerified: false,
+        verifyToken,
+        verifyTokenExpiry,
+        trialEndsAt: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
+        trialTier: 'STARTER',
+      },
+    });
+
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000')
+      .split(',')[0]
+      .trim();
+    const verifyUrl = `${frontendUrl}/auth/verify-email?token=${verifyToken}`;
+
+    void this.emailService.sendEmailVerification({
+      toEmail: user.email,
+      userName: user.name ?? user.email.split('@')[0],
+      verifyUrl,
+    });
+
+    this.logger.log(`New email/password user registered: ${user.email}`);
+    return { message: 'Registration successful. Check your email to verify your account.' };
+  }
+
+  async loginWithPassword(dto: LoginDto): Promise<{ code: string; user: object }> {
+    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+
+    // Always run bcrypt.compare to prevent timing attacks regardless of whether
+    // the user exists or has a password. DUMMY_HASH is a valid bcrypt hash that
+    // never matches any real password — it forces the full CPU work every time.
+    // The try/catch guards against a malformed DUMMY_HASH throwing instead of
+    // returning false, which would silently skip the timing protection.
+    if (!user) {
+      try { await bcrypt.compare(dto.password, DUMMY_HASH); } catch {}
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    if (!user.passwordHash) {
+      // Google-only account — still do full bcrypt work for constant time
+      try { await bcrypt.compare(dto.password, DUMMY_HASH); } catch {}
+      throw new UnauthorizedException(
+        'This account uses Google Sign-In. Please sign in with Google instead.',
+      );
+    }
+
+    const valid = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    if (!user.emailVerified) {
+      throw new ForbiddenException(
+        'Please verify your email before logging in. Check your inbox for the verification link.',
+      );
+    }
+
+    const safeUser = this.sanitizeUser(user);
+    const accessToken = this.jwtService.sign(
+      { sub: user.id, email: user.email },
+      { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
+    );
+    const refreshToken = await this.createSession(user.id);
+    const code = await this.createAuthCode({ accessToken, refreshToken, user: safeUser });
+
+    void this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    this.logger.log(`Email/password login: ${user.id}`);
+    return { code, user: safeUser };
+  }
+
+  async verifyEmail(token: string): Promise<{ code: string; user: object }> {
+    const user = await this.prisma.user.findFirst({ where: { verifyToken: token } });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired verification link.');
+    }
+
+    if (!user.verifyTokenExpiry || user.verifyTokenExpiry < new Date()) {
+      // Clear the expired token so the user must request a new one
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { verifyToken: null, verifyTokenExpiry: null },
+      });
+      throw new UnauthorizedException(
+        'Verification link has expired. Please request a new one.',
+      );
+    }
+
+    const verified = await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerified: true,
+        verifyToken: null,
+        verifyTokenExpiry: null,
+        lastLoginAt: new Date(),
+      },
+    });
+
+    const safeUser = this.sanitizeUser(verified);
+
+    // Auto-login after verification — no second login step required
+    const accessToken = this.jwtService.sign(
+      { sub: verified.id, email: verified.email },
+      { expiresIn: Number(process.env.EXPIRE_ACCESS_TOKEN) },
+    );
+    const refreshToken = await this.createSession(verified.id);
+    const code = await this.createAuthCode({ accessToken, refreshToken, user: safeUser });
+
+    this.logger.log(`Email verified and auto-logged-in: ${verified.id}`);
+    return { code, user: safeUser };
+  }
+
+  async resendVerification(email: string): Promise<{ message: string }> {
+    // Always return the same message to prevent user enumeration
+    const genericResponse = {
+      message:
+        "If that email is registered and unverified, we've sent a new verification link.",
+    };
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.emailVerified || !user.passwordHash) {
+      return genericResponse;
+    }
+
+    // Redis rate limit: one resend per user per 5 minutes.
+    // If Redis is unavailable we skip rate-limiting rather than 500ing.
+    const rateLimitKey = `verify:resend:${user.id}`;
+    try {
+      const limited = await this.redisService.get(rateLimitKey);
+      if (limited) return genericResponse;
+    } catch {
+      // Redis unavailable — proceed without rate-limit enforcement
+    }
+
+    const { token: verifyToken, expiry: verifyTokenExpiry } = this.generateVerifyToken();
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { verifyToken, verifyTokenExpiry },
+    });
+
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000')
+      .split(',')[0]
+      .trim();
+    const verifyUrl = `${frontendUrl}/auth/verify-email?token=${verifyToken}`;
+
+    void this.emailService.sendEmailVerification({
+      toEmail: user.email,
+      userName: user.name ?? user.email.split('@')[0],
+      verifyUrl,
+    });
+
+    try {
+      await this.redisService.set(rateLimitKey, '1', 300); // 5-minute cooldown
+    } catch {
+      // Redis unavailable — rate-limit won't persist but email was already sent
+    }
+    this.logger.log(`Verification email resent to: ${user.email}`);
+    return genericResponse;
+  }
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    // Always return the same generic message to prevent user enumeration
+    const genericResponse = {
+      message: "If that email is registered, we've sent a password reset link.",
+    };
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || !user.passwordHash) {
+      // Not found, or Google-only account (no password to reset)
+      return genericResponse;
+    }
+
+    // Redis rate limit: one reset email per user per 5 minutes
+    const rateLimitKey = `pwd:reset:${user.id}`;
+    try {
+      const limited = await this.redisService.get(rateLimitKey);
+      if (limited) return genericResponse;
+    } catch {
+      // Redis unavailable — skip rate limiting
+    }
+
+    const { token: resetToken, expiry: resetTokenExpiry } = this.generateResetToken();
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { resetToken, resetTokenExpiry },
+    });
+
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000')
+      .split(',')[0]
+      .trim();
+    const resetUrl = `${frontendUrl}/auth/reset-password?token=${resetToken}`;
+
+    void this.emailService.sendPasswordReset({
+      toEmail: user.email,
+      userName: user.name ?? user.email.split('@')[0],
+      resetUrl,
+    });
+
+    try {
+      await this.redisService.set(rateLimitKey, '1', 300); // 5-minute cooldown
+    } catch {
+      // Redis unavailable — rate-limit won't persist
+    }
+
+    this.logger.log(`Password reset email sent to: ${user.email}`);
+    return genericResponse;
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    const user = await this.prisma.user.findFirst({ where: { resetToken: token } });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid or expired reset link.');
+    }
+
+    if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { resetToken: null, resetTokenExpiry: null },
+      });
+      throw new UnauthorizedException('Reset link has expired. Please request a new one.');
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        resetToken: null,
+        resetTokenExpiry: null,
+      },
+    });
+
+    // Revoke all active sessions — password change must invalidate existing logins
+    await this.prisma.session.updateMany({
+      where: { userId: user.id, isRevoked: false },
+      data: { isRevoked: true },
+    });
+
+    this.logger.log(`Password reset completed for user: ${user.id}`);
+    return { message: 'Password reset successful. Please sign in with your new password.' };
+  }
+
+  private generateResetToken(): { token: string; expiry: Date } {
+    const token = randomBytes(32).toString('hex'); // 256-bit URL-safe hex token
+    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    return { token, expiry };
+  }
+
+  private generateVerifyToken(): { token: string; expiry: Date } {
+    const token = randomBytes(32).toString('hex'); // 256-bit URL-safe hex token
+    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    return { token, expiry };
+  }
+
+  // Strip fields that must never leave the server: passwordHash, raw verify tokens.
+  // Called before any user object is embedded in a JWT payload, Redis code, or
+  // HTTP response — so sensitive data cannot reach the browser or be stored in
+  // localStorage via the Zustand auth store.
+  private sanitizeUser(user: Record<string, any>): object {
+    const { passwordHash, verifyToken, verifyTokenExpiry, ...safe } = user;
+    return safe;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   async logout(refreshToken: string) {
     if (!refreshToken) return;
