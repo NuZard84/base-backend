@@ -45,6 +45,7 @@ enum NodeType {
   NOTES
   NAPKIN
   NAPKIN_RESPONSE
+  IMAGE_GEN_RESULT
 }
 
 enum EdgeType {

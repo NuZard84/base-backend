@@ -15,6 +15,7 @@ const NODE_TYPE_MAP: Record<string, NodeType> = {
     YoutubeNode: NodeType.EMBED,
     NapkinNode: NodeType.NAPKIN,
     NapkinResponseNode: NodeType.NAPKIN_RESPONSE,
+    ImageGenResultNode: NodeType.IMAGE_GEN_RESULT,
     default: NodeType.TEXT,
 };
 
