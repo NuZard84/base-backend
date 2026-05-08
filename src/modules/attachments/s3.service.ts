@@ -128,6 +128,11 @@ export class S3Service {
         });
     }
 
+    /** Returns the public HTTPS URL for an object (requires bucket/prefix to be publicly accessible) */
+    getPublicUrl(key: string): string {
+        return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
+    }
+
     /** Builds a stable S3 key for an attachment */
     buildKey(userId: string, type: AttachmentType, extension: string): string {
         const timestamp = Date.now();

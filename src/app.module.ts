@@ -25,6 +25,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { StripeModule } from './modules/stripe/stripe.module';
 import { BugReportsModule } from './modules/bug-reports/bug-reports.module';
 import { NapkinModule } from './modules/napkin/napkin.module';
+import { KlingModule } from './modules/kling/kling.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { NapkinModule } from './modules/napkin/napkin.module';
     StripeModule,
     BugReportsModule,
     NapkinModule,
+    KlingModule,
   ],
   controllers: [AppController],
   providers: [

@@ -46,6 +46,7 @@ enum NodeType {
   NAPKIN
   NAPKIN_RESPONSE
   IMAGE_GEN_RESULT
+  YOUTUBE_VID
 }
 
 enum EdgeType {

@@ -81,7 +81,9 @@ jobs:
             --set-env-vars="ADMIN_ALLOWED_ORIGINS=${{ secrets.ADMIN_ALLOWED_ORIGINS }}" \
             --set-env-vars="RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" \
             --set-env-vars="EMAIL_FROM=${{ secrets.EMAIL_FROM }}" \
-            --set-env-vars="NAPKIN_API_KEY=${{ secrets.NAPKIN_API_KEY }}"
+            --set-env-vars="NAPKIN_API_KEY=${{ secrets.NAPKIN_API_KEY }}" \
+            --set-env-vars="KLING_ACCESS_KEY=${{ secrets.KLING_ACCESS_KEY }}" \
+            --set-env-vars="KLING_SECRET_KEY=${{ secrets.KLING_SECRET_KEY }}"
 
       - name: Show service URL
         run: |

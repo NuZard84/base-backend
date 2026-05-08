@@ -12,10 +12,11 @@ const NODE_TYPE_MAP: Record<string, NodeType> = {
     ImageGenNode: NodeType.IMAGE_GEN,
     CommentNode: NodeType.COMMENT,
     NotesNode: NodeType.NOTES,
-    YoutubeNode: NodeType.EMBED,
+    YoutubeNode: NodeType.YOUTUBE_VID,
     NapkinNode: NodeType.NAPKIN,
     NapkinResponseNode: NodeType.NAPKIN_RESPONSE,
     ImageGenResultNode: NodeType.IMAGE_GEN_RESULT,
+    VideoGenNode: NodeType.VIDEO,
     default: NodeType.TEXT,
 };
 

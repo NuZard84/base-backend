@@ -7,7 +7,8 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { CanvasOp, OpLogEntry } from './dto/canvas-op.dto';
-import { computeTileIds } from './canvas-utils';
+import { NodeRole } from '@prisma/client';
+import { computeTileIds, mapNodeType } from './canvas-utils';
 
 const FLUSH_INTERVAL_MS = 500;
 const PRESENCE_TTL_SECONDS = 30;
@@ -27,6 +28,13 @@ interface PendingNodeState {
     styleOp?: Record<string, unknown>;
     /** node_data ops — merged so rapid updates combine within flush window */
     contentOp?: Record<string, unknown>;
+    /** Full node payload from node_add — used for upsert on first flush */
+    createPayload?: {
+        type: string;
+        x: number;
+        y: number;
+        data: Record<string, unknown>;
+    };
 }
 
 export interface UserPresence {
@@ -148,6 +156,28 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
         const existing: PendingNodeState = map.get(op.nodeId) ?? { clientId: op.nodeId };
 
         switch (op.type) {
+            case 'node_add': {
+                // Store full node payload so flushCanvas can upsert it into the DB
+                const node = op.data as {
+                    type?: string;
+                    position?: { x: number; y: number };
+                    data?: Record<string, unknown>;
+                };
+                map.set(op.nodeId, {
+                    ...existing,
+                    x: node.position?.x ?? 0,
+                    y: node.position?.y ?? 0,
+                    width: 420,
+                    height: 300,
+                    createPayload: {
+                        type: node.type ?? 'ResponseNode',
+                        x: node.position?.x ?? 0,
+                        y: node.position?.y ?? 0,
+                        data: node.data ?? {},
+                    },
+                });
+                break;
+            }
             case 'node_move':
             case 'node_resize': {
                 const d = op.data as { x: number; y: number; width: number; height: number };
@@ -232,6 +262,30 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
     }
 
     private async applyNodeUpdate(canvasId: string, state: PendingNodeState) {
+        // ── node_add: upsert the full node so it's persisted even if HTTP sync races
+        if (state.createPayload) {
+            const nodeType = mapNodeType(state.createPayload.type);
+            const x = state.createPayload.x;
+            const y = state.createPayload.y;
+            const w = state.width ?? 420;
+            const h = state.height ?? 300;
+            await this.prisma.node.upsert({
+                where: { canvasId_clientId: { canvasId, clientId: state.clientId } },
+                create: {
+                    canvasId,
+                    clientId: state.clientId,
+                    x, y, width: w, height: h,
+                    zIndex: state.zIndex ?? 0,
+                    nodeType,
+                    role: NodeRole.INPUT,
+                    content: state.createPayload.data as object,
+                    bboxMinX: x, bboxMinY: y, bboxMaxX: x + w, bboxMaxY: y + h,
+                    tileIds: computeTileIds(x, y, x + w, y + h),
+                },
+                update: {},  // if it already exists (from HTTP sync), don't overwrite
+            });
+        }
+
         // ── Style: use PostgreSQL JSONB merge operator (||) for atomic field-level merge.
         // This means User A changing `fill` and User B changing `stroke` concurrently
         // both survive — neither overwrites the other's field.
