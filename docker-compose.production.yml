@@ -13,5 +13,5 @@ services:
       dockerfile: Dockerfile
       platforms:
         - linux/amd64
-    # GCP Artifact Registry (us-central1, cardboard-ai-backend)
-    image: us-central1-docker.pkg.dev/project-dfd217c3-6aac-4df9-ba6/cardboard-ai-backend/base-backend:latest
+    # GCP Artifact Registry (us-central1, base-backend-2026)
+    image: us-central1-docker.pkg.dev/base-backend-495802/base-backend-2026/base-backend:latest
