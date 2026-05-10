@@ -26,6 +26,8 @@ import { StripeModule } from './modules/stripe/stripe.module';
 import { BugReportsModule } from './modules/bug-reports/bug-reports.module';
 import { NapkinModule } from './modules/napkin/napkin.module';
 import { KlingModule } from './modules/kling/kling.module';
+import { BriaModule } from './modules/bria/bria.module';
+import { AiImageModule } from './modules/ai-image/ai-image.module';
 
 @Module({
   imports: [
@@ -61,6 +63,8 @@ import { KlingModule } from './modules/kling/kling.module';
     BugReportsModule,
     NapkinModule,
     KlingModule,
+    BriaModule,
+    AiImageModule,
   ],
   controllers: [AppController],
   providers: [

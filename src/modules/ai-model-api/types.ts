@@ -69,6 +69,11 @@ export class ImageGenRequestDto {
     @IsString()
     imageSize?: string;            // '1K' | '2K'
 
+    // Imagen 4 only
+    @IsOptional()
+    @IsString()
+    negativePrompt?: string;       // Things to avoid in the generated image
+
     // Gemini native models only
     @IsOptional()
     @IsArray()

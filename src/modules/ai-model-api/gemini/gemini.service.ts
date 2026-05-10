@@ -183,6 +183,7 @@ Follow this layout for all non-trivial queries:
                         numberOfImages: dto.numberOfImages ?? 1,
                         aspectRatio: dto.aspectRatio ?? '1:1',
                         personGeneration: 'allow_adult',
+                        ...(dto.negativePrompt ? { negativePrompt: dto.negativePrompt } : {}),
                         ...(dto.imageSize ? { outputOptions: { imageSize: dto.imageSize } } : {}),
                     },
                 }));
@@ -210,7 +211,10 @@ Follow this layout for all non-trivial queries:
                 const response = await withTimeout(this.genAI.models.generateContent({
                     model: dto.model,
                     contents: [{ role: 'user', parts }],
-                    config: { responseModalities: ['TEXT', 'IMAGE'] } as any,
+                    config: {
+                        responseModalities: ['TEXT', 'IMAGE'],
+                        ...(dto.aspectRatio ? { imageGenerationConfig: { aspectRatio: dto.aspectRatio } } : {}),
+                    } as any,
                 }));
 
                 for (const part of response.candidates?.[0]?.content?.parts ?? []) {
