@@ -37,7 +37,7 @@ for (const envVar of requiredEnvVars) {
 // the signing key. A short secret makes offline dictionary attacks trivial.
 if ((process.env.JWT_SECRET ?? '').length < 32) {
   throw new Error('JWT_SECRET must be at least 32 characters long');
-}
+} 
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
