@@ -17,6 +17,7 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { AiImageService } from './ai-image.service';
 import { EraseImageDto } from './dto/erase-image.dto';
+import { DetectTextDto } from './dto/detect-text.dto';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
@@ -99,6 +100,14 @@ export class AiImageController {
     const png = await this.aiImage.binaryMask(file, points);
     res.set(PNG_HEADERS(png.length));
     res.send(png);
+  }
+
+  @Post('detect-text')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Detect text regions in image via Google Cloud Vision' })
+  @ApiResponse({ status: 200, description: 'Array of detected text lines with index' })
+  async detectText(@Body() dto: DetectTextDto) {
+    return this.aiImage.detectText(dto.imageUrl);
   }
 
   @Post('alpha-mask')

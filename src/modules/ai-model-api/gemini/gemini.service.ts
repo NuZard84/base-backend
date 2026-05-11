@@ -208,6 +208,16 @@ Follow this layout for all non-trivial queries:
                     parts.push({ inlineData: { mimeType, data } });
                 }
 
+                // Fetch URLs server-side to avoid browser CORS restrictions
+                for (const url of dto.referenceImageUrls ?? []) {
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error(`Failed to fetch reference image: ${res.status}`);
+                    const contentType = res.headers.get('content-type') ?? 'image/jpeg';
+                    const mimeType = contentType.split(';')[0].trim();
+                    const buffer = Buffer.from(await res.arrayBuffer());
+                    parts.push({ inlineData: { mimeType, data: buffer.toString('base64') } });
+                }
+
                 const response = await withTimeout(this.genAI.models.generateContent({
                     model: dto.model,
                     contents: [{ role: 'user', parts }],

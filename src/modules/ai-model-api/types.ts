@@ -79,6 +79,11 @@ export class ImageGenRequestDto {
     @IsArray()
     @IsString({ each: true })
     referenceImages?: string[];    // base64 data URLs (data:image/...;base64,...)
+
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    referenceImageUrls?: string[];  // HTTP URLs fetched server-side (avoids browser CORS)
 }
 
 export interface GeneratedImageItem {

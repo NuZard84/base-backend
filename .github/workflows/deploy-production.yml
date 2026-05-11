@@ -84,7 +84,8 @@ jobs:
             --set-env-vars="NAPKIN_API_KEY=${{ secrets.NAPKIN_API_KEY }}" \
             --set-env-vars="KLING_ACCESS_KEY=${{ secrets.KLING_ACCESS_KEY }}" \
             --set-env-vars="KLING_SECRET_KEY=${{ secrets.KLING_SECRET_KEY }}" \
-            --set-env-vars="BRIA_API_KEY=${{ secrets.BRIA_API_KEY }}"
+            --set-env-vars="BRIA_API_KEY=${{ secrets.BRIA_API_KEY }}" \
+            --set-env-vars="GOOGLE_CLOUD_VISION_CREDENTIALS=${{ secrets.GOOGLE_CLOUD_VISION_CREDENTIALS }}"
 
       - name: Show service URL
         run: |
