@@ -40,6 +40,12 @@ jobs:
           docker compose -f docker-compose.production.yml build
           docker compose -f docker-compose.production.yml push
 
+      - name: Write env vars file
+        run: |
+          cat > /tmp/env-vars.yaml << 'ENVEOF'
+          GOOGLE_CLOUD_VISION_CREDENTIALS: '${{ secrets.GOOGLE_CLOUD_VISION_CREDENTIALS }}'
+          ENVEOF
+
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE }} \
@@ -85,7 +91,7 @@ jobs:
             --set-env-vars="KLING_ACCESS_KEY=${{ secrets.KLING_ACCESS_KEY }}" \
             --set-env-vars="KLING_SECRET_KEY=${{ secrets.KLING_SECRET_KEY }}" \
             --set-env-vars="BRIA_API_KEY=${{ secrets.BRIA_API_KEY }}" \
-            --set-env-vars="GOOGLE_CLOUD_VISION_CREDENTIALS=${{ secrets.GOOGLE_CLOUD_VISION_CREDENTIALS }}"
+            --env-vars-file=/tmp/env-vars.yaml
 
       - name: Show service URL
         run: |
