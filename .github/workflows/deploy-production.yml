@@ -42,46 +42,68 @@ jobs:
 
       - name: Write env vars file
         env:
+          NODE_ENV: production
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          REDIS_USERNAME: ${{ secrets.REDIS_USERNAME }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          AWS_S3_ACCESS_KEY: ${{ secrets.AWS_S3_ACCESS_KEY }}
+          AWS_S3_SECRET_KEY: ${{ secrets.AWS_S3_SECRET_KEY }}
+          AWS_S3_REGION: ${{ secrets.AWS_S3_REGION }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          EXPIRE_ACCESS_TOKEN: ${{ secrets.EXPIRE_ACCESS_TOKEN }}
+          EXPIRE_REFRESH_TOKEN: ${{ secrets.EXPIRE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_CALLBACK_URL: ${{ secrets.GOOGLE_CALLBACK_URL }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_DEFAULT_PROVIDER: ${{ secrets.AI_DEFAULT_PROVIDER }}
+          ADMIN_PIN: ${{ secrets.ADMIN_PIN }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+          ADMIN_ALLOWED_ORIGINS: ${{ secrets.ADMIN_ALLOWED_ORIGINS }}
+          DATABASE_URL_DEV: ${{ secrets.DATABASE_URL_DEV }}
+          DATABASE_URL_PROD: ${{ secrets.DATABASE_URL_PROD }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRICE_PRO: ${{ secrets.STRIPE_PRICE_PRO }}
+          STRIPE_PRICE_PLUS: ${{ secrets.STRIPE_PRICE_PLUS }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          NAPKIN_API_KEY: ${{ secrets.NAPKIN_API_KEY }}
+          KLING_ACCESS_KEY: ${{ secrets.KLING_ACCESS_KEY }}
+          KLING_SECRET_KEY: ${{ secrets.KLING_SECRET_KEY }}
+          BRIA_API_KEY: ${{ secrets.BRIA_API_KEY }}
           GOOGLE_CLOUD_VISION_CREDENTIALS: ${{ secrets.GOOGLE_CLOUD_VISION_CREDENTIALS }}
         run: |
-          cat > /tmp/env-vars.yaml << EOF
-          NODE_ENV: "production"
-          REDIS_HOST: "${{ secrets.REDIS_HOST }}"
-          REDIS_PORT: "${{ secrets.REDIS_PORT }}"
-          REDIS_USERNAME: "${{ secrets.REDIS_USERNAME }}"
-          REDIS_PASSWORD: "${{ secrets.REDIS_PASSWORD }}"
-          AWS_S3_ACCESS_KEY: "${{ secrets.AWS_S3_ACCESS_KEY }}"
-          AWS_S3_SECRET_KEY: "${{ secrets.AWS_S3_SECRET_KEY }}"
-          AWS_S3_REGION: "${{ secrets.AWS_S3_REGION }}"
-          AWS_S3_BUCKET: "${{ secrets.AWS_S3_BUCKET }}"
-          JWT_SECRET: "${{ secrets.JWT_SECRET }}"
-          EXPIRE_ACCESS_TOKEN: "${{ secrets.EXPIRE_ACCESS_TOKEN }}"
-          EXPIRE_REFRESH_TOKEN: "${{ secrets.EXPIRE_REFRESH_TOKEN }}"
-          GOOGLE_CLIENT_ID: "${{ secrets.GOOGLE_CLIENT_ID }}"
-          GOOGLE_CLIENT_SECRET: "${{ secrets.GOOGLE_CLIENT_SECRET }}"
-          GOOGLE_CALLBACK_URL: "${{ secrets.GOOGLE_CALLBACK_URL }}"
-          FRONTEND_URL: "${{ secrets.FRONTEND_URL }}"
-          GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
-          AI_DEFAULT_PROVIDER: "${{ secrets.AI_DEFAULT_PROVIDER }}"
-          ADMIN_PIN: "${{ secrets.ADMIN_PIN }}"
-          ADMIN_USERNAME: "${{ secrets.ADMIN_USERNAME }}"
-          ADMIN_JWT_SECRET: "${{ secrets.ADMIN_JWT_SECRET }}"
-          ADMIN_ALLOWED_ORIGINS: "${{ secrets.ADMIN_ALLOWED_ORIGINS }}"
-          DATABASE_URL_DEV: "${{ secrets.DATABASE_URL_DEV }}"
-          DATABASE_URL_PROD: "${{ secrets.DATABASE_URL_PROD }}"
-          STRIPE_PUBLISHABLE_KEY: "${{ secrets.STRIPE_PUBLISHABLE_KEY }}"
-          STRIPE_SECRET_KEY: "${{ secrets.STRIPE_SECRET_KEY }}"
-          STRIPE_WEBHOOK_SECRET: "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
-          STRIPE_PRICE_PRO: "${{ secrets.STRIPE_PRICE_PRO }}"
-          STRIPE_PRICE_PLUS: "${{ secrets.STRIPE_PRICE_PLUS }}"
-          RESEND_API_KEY: "${{ secrets.RESEND_API_KEY }}"
-          EMAIL_FROM: "${{ secrets.EMAIL_FROM }}"
-          NAPKIN_API_KEY: "${{ secrets.NAPKIN_API_KEY }}"
-          KLING_ACCESS_KEY: "${{ secrets.KLING_ACCESS_KEY }}"
-          KLING_SECRET_KEY: "${{ secrets.KLING_SECRET_KEY }}"
-          BRIA_API_KEY: "${{ secrets.BRIA_API_KEY }}"
-          GOOGLE_CLOUD_VISION_CREDENTIALS: ${GOOGLE_CLOUD_VISION_CREDENTIALS}
-          EOF
+          python3 << 'PYEOF'
+          import os
+
+          keys = [
+            "NODE_ENV", "REDIS_HOST", "REDIS_PORT", "REDIS_USERNAME", "REDIS_PASSWORD",
+            "AWS_S3_ACCESS_KEY", "AWS_S3_SECRET_KEY", "AWS_S3_REGION", "AWS_S3_BUCKET",
+            "JWT_SECRET", "EXPIRE_ACCESS_TOKEN", "EXPIRE_REFRESH_TOKEN",
+            "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_CALLBACK_URL", "FRONTEND_URL",
+            "GEMINI_API_KEY", "AI_DEFAULT_PROVIDER",
+            "ADMIN_PIN", "ADMIN_USERNAME", "ADMIN_JWT_SECRET", "ADMIN_ALLOWED_ORIGINS",
+            "DATABASE_URL_DEV", "DATABASE_URL_PROD",
+            "STRIPE_PUBLISHABLE_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
+            "STRIPE_PRICE_PRO", "STRIPE_PRICE_PLUS",
+            "RESEND_API_KEY", "EMAIL_FROM", "NAPKIN_API_KEY",
+            "KLING_ACCESS_KEY", "KLING_SECRET_KEY", "BRIA_API_KEY",
+            "GOOGLE_CLOUD_VISION_CREDENTIALS",
+          ]
+
+          with open("/tmp/env-vars.yaml", "w") as f:
+            for key in keys:
+              value = os.environ.get(key, "")
+              # YAML single-quoted string — escape internal single quotes by doubling them
+              escaped = value.replace("'", "''")
+              f.write(f"{key}: '{escaped}'\n")
+          PYEOF
 
       - name: Deploy to Cloud Run
         run: |
