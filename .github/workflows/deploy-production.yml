@@ -41,10 +41,47 @@ jobs:
           docker compose -f docker-compose.production.yml push
 
       - name: Write env vars file
+        env:
+          GOOGLE_CLOUD_VISION_CREDENTIALS: ${{ secrets.GOOGLE_CLOUD_VISION_CREDENTIALS }}
         run: |
-          cat > /tmp/env-vars.yaml << 'ENVEOF'
-          GOOGLE_CLOUD_VISION_CREDENTIALS: '${{ secrets.GOOGLE_CLOUD_VISION_CREDENTIALS }}'
-          ENVEOF
+          cat > /tmp/env-vars.yaml << EOF
+          NODE_ENV: "production"
+          REDIS_HOST: "${{ secrets.REDIS_HOST }}"
+          REDIS_PORT: "${{ secrets.REDIS_PORT }}"
+          REDIS_USERNAME: "${{ secrets.REDIS_USERNAME }}"
+          REDIS_PASSWORD: "${{ secrets.REDIS_PASSWORD }}"
+          AWS_S3_ACCESS_KEY: "${{ secrets.AWS_S3_ACCESS_KEY }}"
+          AWS_S3_SECRET_KEY: "${{ secrets.AWS_S3_SECRET_KEY }}"
+          AWS_S3_REGION: "${{ secrets.AWS_S3_REGION }}"
+          AWS_S3_BUCKET: "${{ secrets.AWS_S3_BUCKET }}"
+          JWT_SECRET: "${{ secrets.JWT_SECRET }}"
+          EXPIRE_ACCESS_TOKEN: "${{ secrets.EXPIRE_ACCESS_TOKEN }}"
+          EXPIRE_REFRESH_TOKEN: "${{ secrets.EXPIRE_REFRESH_TOKEN }}"
+          GOOGLE_CLIENT_ID: "${{ secrets.GOOGLE_CLIENT_ID }}"
+          GOOGLE_CLIENT_SECRET: "${{ secrets.GOOGLE_CLIENT_SECRET }}"
+          GOOGLE_CALLBACK_URL: "${{ secrets.GOOGLE_CALLBACK_URL }}"
+          FRONTEND_URL: "${{ secrets.FRONTEND_URL }}"
+          GEMINI_API_KEY: "${{ secrets.GEMINI_API_KEY }}"
+          AI_DEFAULT_PROVIDER: "${{ secrets.AI_DEFAULT_PROVIDER }}"
+          ADMIN_PIN: "${{ secrets.ADMIN_PIN }}"
+          ADMIN_USERNAME: "${{ secrets.ADMIN_USERNAME }}"
+          ADMIN_JWT_SECRET: "${{ secrets.ADMIN_JWT_SECRET }}"
+          ADMIN_ALLOWED_ORIGINS: "${{ secrets.ADMIN_ALLOWED_ORIGINS }}"
+          DATABASE_URL_DEV: "${{ secrets.DATABASE_URL_DEV }}"
+          DATABASE_URL_PROD: "${{ secrets.DATABASE_URL_PROD }}"
+          STRIPE_PUBLISHABLE_KEY: "${{ secrets.STRIPE_PUBLISHABLE_KEY }}"
+          STRIPE_SECRET_KEY: "${{ secrets.STRIPE_SECRET_KEY }}"
+          STRIPE_WEBHOOK_SECRET: "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
+          STRIPE_PRICE_PRO: "${{ secrets.STRIPE_PRICE_PRO }}"
+          STRIPE_PRICE_PLUS: "${{ secrets.STRIPE_PRICE_PLUS }}"
+          RESEND_API_KEY: "${{ secrets.RESEND_API_KEY }}"
+          EMAIL_FROM: "${{ secrets.EMAIL_FROM }}"
+          NAPKIN_API_KEY: "${{ secrets.NAPKIN_API_KEY }}"
+          KLING_ACCESS_KEY: "${{ secrets.KLING_ACCESS_KEY }}"
+          KLING_SECRET_KEY: "${{ secrets.KLING_SECRET_KEY }}"
+          BRIA_API_KEY: "${{ secrets.BRIA_API_KEY }}"
+          GOOGLE_CLOUD_VISION_CREDENTIALS: ${GOOGLE_CLOUD_VISION_CREDENTIALS}
+          EOF
 
       - name: Deploy to Cloud Run
         run: |
@@ -56,41 +93,6 @@ jobs:
             --timeout 3600 \
             --min-instances=1 \
             --no-use-http2 \
-            --set-env-vars="NODE_ENV=production" \
-            --set-env-vars="REDIS_HOST=${{ secrets.REDIS_HOST }}" \
-            --set-env-vars="AWS_S3_ACCESS_KEY=${{ secrets.AWS_S3_ACCESS_KEY }}" \
-            --set-env-vars="AWS_S3_SECRET_KEY=${{ secrets.AWS_S3_SECRET_KEY }}" \
-            --set-env-vars="AWS_S3_REGION=${{ secrets.AWS_S3_REGION }}" \
-            --set-env-vars="AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}" \
-            --set-env-vars="REDIS_PORT=${{ secrets.REDIS_PORT }}" \
-            --set-env-vars="REDIS_USERNAME=${{ secrets.REDIS_USERNAME }}" \
-            --set-env-vars="REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}" \
-            --set-env-vars="JWT_SECRET=${{ secrets.JWT_SECRET }}" \
-            --set-env-vars="EXPIRE_ACCESS_TOKEN=${{ secrets.EXPIRE_ACCESS_TOKEN }}" \
-            --set-env-vars="EXPIRE_REFRESH_TOKEN=${{ secrets.EXPIRE_REFRESH_TOKEN }}" \
-            --set-env-vars="GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" \
-            --set-env-vars="GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" \
-            --set-env-vars="GOOGLE_CALLBACK_URL=${{ secrets.GOOGLE_CALLBACK_URL }}" \
-            --set-env-vars="^||^FRONTEND_URL=${{ secrets.FRONTEND_URL }}" \
-            --set-env-vars="GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" \
-            --set-env-vars="AI_DEFAULT_PROVIDER=${{ secrets.AI_DEFAULT_PROVIDER }}" \
-            --set-env-vars="ADMIN_PIN=${{ secrets.ADMIN_PIN }}" \
-            --set-env-vars="ADMIN_JWT_SECRET=${{ secrets.ADMIN_JWT_SECRET }}" \
-            --set-env-vars="DATABASE_URL_DEV=${{ secrets.DATABASE_URL_DEV }}" \
-            --set-env-vars="DATABASE_URL_PROD=${{ secrets.DATABASE_URL_PROD }}" \
-            --set-env-vars="STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
-            --set-env-vars="STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}" \
-            --set-env-vars="STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
-            --set-env-vars="STRIPE_PRICE_PRO=${{ secrets.STRIPE_PRICE_PRO }}" \
-            --set-env-vars="STRIPE_PRICE_PLUS=${{ secrets.STRIPE_PRICE_PLUS }}" \
-            --set-env-vars="ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}" \
-            --set-env-vars="ADMIN_ALLOWED_ORIGINS=${{ secrets.ADMIN_ALLOWED_ORIGINS }}" \
-            --set-env-vars="RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" \
-            --set-env-vars="EMAIL_FROM=${{ secrets.EMAIL_FROM }}" \
-            --set-env-vars="NAPKIN_API_KEY=${{ secrets.NAPKIN_API_KEY }}" \
-            --set-env-vars="KLING_ACCESS_KEY=${{ secrets.KLING_ACCESS_KEY }}" \
-            --set-env-vars="KLING_SECRET_KEY=${{ secrets.KLING_SECRET_KEY }}" \
-            --set-env-vars="BRIA_API_KEY=${{ secrets.BRIA_API_KEY }}" \
             --env-vars-file=/tmp/env-vars.yaml
 
       - name: Show service URL
