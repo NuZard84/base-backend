@@ -10,6 +10,9 @@ import {
     UploadedFile,
     Req,
     Query,
+    HttpCode,
+    HttpStatus,
+    BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -106,5 +109,20 @@ export class AttachmentsController {
     @ApiResponse({ status: 404, description: 'Attachment not found.' })
     remove(@Req() req, @Param('id') id: string) {
         return this.attachmentsService.remove(req.user.userId, id);
+    }
+
+    @Post('refresh-url')
+    @UseGuards(JwtAuthGuard)
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({
+        summary: 'Refresh a presigned URL for an S3 key',
+        description: 'Re-signs the given S3 key with a fresh 7-day presigned GET URL. Used to recover expired image URLs for generated images on the canvas.',
+    })
+    @ApiResponse({ status: 200, schema: { example: { url: 'https://...' } } })
+    refreshUrl(@Body() body: { key: string }) {
+        if (!body?.key || typeof body.key !== 'string') {
+            throw new BadRequestException('key is required');
+        }
+        return this.attachmentsService.refreshPresignedUrl(body.key);
     }
 }

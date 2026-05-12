@@ -180,4 +180,18 @@ export class AttachmentsService {
 
         return { id, deleted: true };
     }
+
+    /**
+     * Re-signs an S3 key with a fresh 7-day presigned GET URL.
+     * No ownership check — the opaque key acts as authorization.
+     * Used by the frontend to refresh expired presigned URLs for generated images.
+     */
+    async refreshPresignedUrl(key: string): Promise<{ url: string }> {
+        const url = await this.s3.getPresignedUrl({
+            key,
+            expiresIn: 60 * 60 * 24 * 7,
+            disposition: 'inline',
+        });
+        return { url };
+    }
 }
