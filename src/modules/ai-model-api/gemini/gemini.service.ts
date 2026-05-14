@@ -223,7 +223,7 @@ Follow this layout for all non-trivial queries:
                     contents: [{ role: 'user', parts }],
                     config: {
                         responseModalities: ['TEXT', 'IMAGE'],
-                        ...(dto.aspectRatio ? { imageGenerationConfig: { aspectRatio: dto.aspectRatio } } : {}),
+                        ...(dto.aspectRatio ? { imageConfig: { aspectRatio: dto.aspectRatio } } : {}),
                     } as any,
                 }));
 
