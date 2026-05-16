@@ -5,6 +5,7 @@ import {
   UseInterceptors,
   UploadedFile,
   Body,
+  Req,
   HttpCode,
   HttpStatus,
   Logger,
@@ -15,6 +16,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody, ApiResponse } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { PlanService, RESOURCE_TYPES } from 'src/common/plans';
+import { CreditService } from 'src/common/credits/credit.service';
 import { AiImageService } from './ai-image.service';
 import { EraseImageDto } from './dto/erase-image.dto';
 import { DetectTextDto } from './dto/detect-text.dto';
@@ -46,7 +49,11 @@ const PNG_HEADERS = (length: number) => ({
 export class AiImageController {
   private readonly logger = new Logger(AiImageController.name);
 
-  constructor(private readonly aiImage: AiImageService) {}
+  constructor(
+    private readonly aiImage: AiImageService,
+    private readonly planService: PlanService,
+    private readonly creditService: CreditService,
+  ) {}
 
   @Post('segment')
   @HttpCode(HttpStatus.OK)
@@ -66,11 +73,18 @@ export class AiImageController {
   async segment(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: EraseImageDto,
+    @Req() req: { user: { userId: string } },
     @Res() res: Response,
   ): Promise<void> {
+    const { userId } = req.user;
     const points = dto.parsedPoints();
     this.logger.log(`[POST /segment] ${points.length} point(s)`);
+    await this.creditService.grantMonthlyCredits(userId);
+    const cost = await this.creditService.getCost('text_editor');
+    await this.creditService.check(userId, cost);
     const png = await this.aiImage.segmentPreview(file, points);
+    await this.planService.logUsage(userId, RESOURCE_TYPES.TEXT_EDITOR, 1, { tool: 'segment' });
+    await this.creditService.deduct(userId, cost, 'text_editor:segment', RESOURCE_TYPES.TEXT_EDITOR);
     res.set(PNG_HEADERS(png.length));
     res.send(png);
   }
@@ -93,11 +107,18 @@ export class AiImageController {
   async mask(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: EraseImageDto,
+    @Req() req: { user: { userId: string } },
     @Res() res: Response,
   ): Promise<void> {
+    const { userId } = req.user;
     const points = dto.parsedPoints();
     this.logger.log(`[POST /mask] ${points.length} point(s)`);
+    await this.creditService.grantMonthlyCredits(userId);
+    const cost = await this.creditService.getCost('text_editor');
+    await this.creditService.check(userId, cost);
     const png = await this.aiImage.binaryMask(file, points);
+    await this.planService.logUsage(userId, RESOURCE_TYPES.TEXT_EDITOR, 1, { tool: 'mask' });
+    await this.creditService.deduct(userId, cost, 'text_editor:mask', RESOURCE_TYPES.TEXT_EDITOR);
     res.set(PNG_HEADERS(png.length));
     res.send(png);
   }
@@ -128,11 +149,18 @@ export class AiImageController {
   async alphaMask(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: EraseImageDto,
+    @Req() req: { user: { userId: string } },
     @Res() res: Response,
   ): Promise<void> {
+    const { userId } = req.user;
     const points = dto.parsedPoints();
     this.logger.log(`[POST /alpha-mask] ${points.length} point(s)`);
+    await this.creditService.grantMonthlyCredits(userId);
+    const cost = await this.creditService.getCost('text_editor');
+    await this.creditService.check(userId, cost);
     const png = await this.aiImage.alphaMask(file, points);
+    await this.planService.logUsage(userId, RESOURCE_TYPES.TEXT_EDITOR, 1, { tool: 'alpha-mask' });
+    await this.creditService.deduct(userId, cost, 'text_editor:alpha-mask', RESOURCE_TYPES.TEXT_EDITOR);
     res.set(PNG_HEADERS(png.length));
     res.send(png);
   }

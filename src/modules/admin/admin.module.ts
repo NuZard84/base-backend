@@ -6,9 +6,10 @@ import { AdminOriginGuard } from './admin-origin.guard';
 import { RedisModule } from 'src/redis/redis.module';
 import { StripeModule } from '../stripe/stripe.module';
 import { BugReportsModule } from '../bug-reports/bug-reports.module';
+import { CreditModule } from 'src/common/credits/credit.module';
 
 @Module({
-  imports: [RedisModule, StripeModule, BugReportsModule],
+  imports: [RedisModule, StripeModule, BugReportsModule, CreditModule],
   controllers: [AdminController],
   providers: [AdminService, AdminGuard, AdminOriginGuard],
 })

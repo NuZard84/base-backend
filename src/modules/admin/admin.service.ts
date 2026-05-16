@@ -53,6 +53,26 @@ export interface AdminUserRow {
   aiTokensThisMonth: number;
   imageGenThisMonth: number;
   storageUsedMb: number;
+  creditBalance: number;
+}
+
+export interface CreditAnalytics {
+  totals: {
+    grantedThisMonth: number;
+    consumedThisMonth: number;
+    purchasedThisMonth: number;
+    grantedAllTime: number;
+    consumedAllTime: number;
+    purchasedAllTime: number;
+  };
+  topConsumers: {
+    userId: string;
+    email: string;
+    name: string | null;
+    creditsConsumed: number;
+    balance: number;
+  }[];
+  dailyUsage: { date: string; consumed: number; granted: number }[];
 }
 
 export interface AdminUsersResult {
@@ -317,6 +337,7 @@ export class AdminService {
           trialTier: true,
           createdAt: true,
           lastLoginAt: true,
+          creditBalance: true,
           _count: { select: { canvases: true } },
         },
       }),
@@ -371,6 +392,7 @@ export class AdminService {
       aiTokensThisMonth: aiTokenMap[u.id] ?? 0,
       imageGenThisMonth: imgMap[u.id] ?? 0,
       storageUsedMb: storMap[u.id] ?? 0,
+      creditBalance: u.creditBalance,
     }));
 
     return {
@@ -501,6 +523,78 @@ export class AdminService {
   async getConfigValue(key: string, defaultValue: string): Promise<string> {
     const row = await this.prisma.appConfig.findUnique({ where: { key } });
     return row?.value ?? defaultValue;
+  }
+
+  // ─── Credit Analytics ─────────────────────────────────────────────────────────
+
+  async getCreditAnalytics(): Promise<CreditAnalytics> {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const last30Days = new Date(Date.now() - 30 * 86_400_000);
+
+    const [totalsThisMonth, totalsAllTime, topConsumers, dailyUsage] = await Promise.all([
+      this.prisma.creditTransaction.groupBy({
+        by: ['type'],
+        _sum: { amount: true },
+        where: { createdAt: { gte: startOfMonth } },
+      }),
+      this.prisma.creditTransaction.groupBy({
+        by: ['type'],
+        _sum: { amount: true },
+      }),
+      this.prisma.creditTransaction.groupBy({
+        by: ['userId'],
+        _sum: { amount: true },
+        where: { type: 'USAGE', createdAt: { gte: startOfMonth } },
+        orderBy: { _sum: { amount: 'asc' } },
+        take: 10,
+      }),
+      this.prisma.$queryRaw<{ date: string; consumed: bigint; granted: bigint }[]>`
+        SELECT
+          DATE("createdAt")::text AS date,
+          SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END)::bigint AS consumed,
+          SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)::bigint AS granted
+        FROM credit_transactions
+        WHERE "createdAt" >= ${last30Days}
+        GROUP BY DATE("createdAt")
+        ORDER BY date ASC
+      `,
+    ]);
+
+    const topIds = topConsumers.map((c) => c.userId);
+    const topUsers = topIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: topIds } },
+          select: { id: true, email: true, name: true, creditBalance: true },
+        })
+      : [];
+    const userMap = Object.fromEntries(topUsers.map((u) => [u.id, u]));
+
+    const sumByType = (data: { type: string; _sum: { amount: number | null } }[], type: string) =>
+      data.find((d) => d.type === type)?._sum.amount ?? 0;
+
+    return {
+      totals: {
+        grantedThisMonth: sumByType(totalsThisMonth as any, 'PLAN_GRANT'),
+        consumedThisMonth: Math.abs(Math.min(0, sumByType(totalsThisMonth as any, 'USAGE'))),
+        purchasedThisMonth: sumByType(totalsThisMonth as any, 'PURCHASE'),
+        grantedAllTime: sumByType(totalsAllTime as any, 'PLAN_GRANT'),
+        consumedAllTime: Math.abs(Math.min(0, sumByType(totalsAllTime as any, 'USAGE'))),
+        purchasedAllTime: sumByType(totalsAllTime as any, 'PURCHASE'),
+      },
+      topConsumers: topConsumers.map((c) => ({
+        userId: c.userId,
+        email: userMap[c.userId]?.email ?? 'unknown',
+        name: userMap[c.userId]?.name ?? null,
+        creditsConsumed: Math.abs(c._sum.amount ?? 0),
+        balance: userMap[c.userId]?.creditBalance ?? 0,
+      })),
+      dailyUsage: dailyUsage.map((d) => ({
+        date: d.date,
+        consumed: Number(d.consumed),
+        granted: Number(d.granted),
+      })),
+    };
   }
 
   // ─── Revenue ─────────────────────────────────────────────────────────────────

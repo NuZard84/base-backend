@@ -21,6 +21,8 @@ import { PrismaService } from 'prisma/prisma.service';
 import { StripeService } from './stripe.service';
 import { STRIPE_EVENTS } from './stripe.constants';
 import { EmailService } from '../email/email.service';
+import { CreditService } from '../../common/credits/credit.service';
+import { CreditTxType } from '@prisma/client';
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,30 @@ export class CreateCheckoutDto {
 export class CreatePortalDto {
     @IsNotEmpty() @IsString() returnUrl: string;
 }
+
+export class CreateCreditCheckoutDto {
+    @IsNotEmpty() @IsString() packKey: string;
+    @IsNotEmpty() @IsString() successUrl: string;
+    @IsNotEmpty() @IsString() cancelUrl: string;
+}
+
+// ─── Credit pack definitions ──────────────────────────────────────────────────
+// Defined here as fallbacks; admin can override via AppConfig
+// key: credit_pack:<packKey> → JSON: { credits, priceCents, label }
+
+interface CreditPack {
+    key: string;
+    credits: number;
+    priceCents: number;
+    label: string;
+    badge?: string;
+}
+
+const DEFAULT_CREDIT_PACKS: CreditPack[] = [
+    { key: 'credits_200',  credits: 200,  priceCents: 299,  label: 'Starter Pack',  badge: 'Most affordable' },
+    { key: 'credits_800',  credits: 800,  priceCents: 999,  label: 'Creator Pack',  badge: 'Best value' },
+    { key: 'credits_2500', credits: 2500, priceCents: 2499, label: 'Pro Pack',       badge: 'Highest value' },
+];
 
 // ─── StripeController ─────────────────────────────────────────────────────────
 
@@ -50,6 +76,7 @@ export class StripeController {
         private readonly prisma: PrismaService,
         private readonly config: ConfigService,
         private readonly email: EmailService,
+        private readonly creditService: CreditService,
     ) {
         const entries: [string, PlanTier][] = [
             [config.get<string>('STRIPE_PRICE_STARTER', ''), PlanTier.STARTER],
@@ -106,6 +133,86 @@ export class StripeController {
             trialPeriodDays: body.trialPeriodDays,
             mode: 'subscription',
         });
+    }
+
+    // ─── Credit Packs ─────────────────────────────────────────────────────────
+
+    @Get('credit-packs')
+    @ApiOperation({ summary: 'List available credit pack options for purchase' })
+    async getCreditPacks() {
+        const rows = await this.prisma.appConfig.findMany({
+            where: { key: { startsWith: 'credit_pack:' } },
+        });
+        const overrides = new Map(rows.map((r) => [r.key.replace('credit_pack:', ''), r.value]));
+
+        return DEFAULT_CREDIT_PACKS.map((pack) => {
+            const override = overrides.get(pack.key);
+            if (!override) return pack;
+            try {
+                const parsed = JSON.parse(override);
+                return { ...pack, ...parsed, key: pack.key };
+            } catch {
+                return pack;
+            }
+        }).filter((p) => p.credits > 0 && p.priceCents > 0);
+    }
+
+    @Post('checkout/credits')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth('bearer')
+    @ApiOperation({ summary: 'Create a Stripe Checkout session for a one-time credit purchase' })
+    async createCreditCheckout(@Req() req, @Body() body: CreateCreditCheckoutDto) {
+        const { userId } = req.user;
+
+        // Resolve pack — from AppConfig override first, then default
+        const packOverride = await this.prisma.appConfig.findUnique({
+            where: { key: `credit_pack:${body.packKey}` },
+        });
+        let pack: CreditPack | undefined = DEFAULT_CREDIT_PACKS.find((p) => p.key === body.packKey);
+
+        if (packOverride) {
+            try {
+                const parsed = JSON.parse(packOverride.value);
+                pack = { ...pack!, ...parsed, key: body.packKey };
+            } catch {}
+        }
+
+        if (!pack || pack.credits <= 0) {
+            throw new BadRequestException(`Unknown credit pack: ${body.packKey}`);
+        }
+
+        const user = await this.prisma.user.findUniqueOrThrow({
+            where: { id: userId },
+            select: { stripeId: true, email: true },
+        });
+
+        this.logger.log(`Creating credit checkout for user=${userId} pack=${body.packKey} credits=${pack.credits} price=${pack.priceCents}¢`);
+
+        const session = await this.stripeService.getStripeInstance().checkout.sessions.create({
+            mode: 'payment',
+            customer: user.stripeId ?? undefined,
+            customer_email: user.stripeId ? undefined : user.email,
+            payment_method_types: ['card'],
+            line_items: [{
+                price_data: {
+                    currency: 'usd',
+                    unit_amount: pack.priceCents,
+                    product_data: { name: `${pack.credits.toLocaleString()} TryDraft Credits — ${pack.label}` },
+                },
+                quantity: 1,
+            }],
+            metadata: {
+                userId,
+                type: 'credit_purchase',
+                packKey: body.packKey,
+                credits: String(pack.credits),
+            },
+            success_url: body.successUrl,
+            cancel_url: body.cancelUrl,
+        });
+
+        if (!session.url) throw new BadRequestException('Stripe did not return a checkout URL');
+        return { url: session.url, sessionId: session.id };
     }
 
     // ─── Billing Portal ───────────────────────────────────────────────────────
@@ -297,6 +404,30 @@ export class StripeController {
             return null;
         }
 
+        // ── Credit purchase ──────────────────────────────────────────────────
+        if (session.metadata?.type === 'credit_purchase') {
+            const credits = parseInt(session.metadata.credits ?? '0', 10);
+            const packKey = session.metadata.packKey ?? 'unknown';
+
+            if (credits > 0) {
+                await this.creditService.add(userId, credits, CreditTxType.PURCHASE, `credit_purchase:${packKey}`);
+                this.logger.log(`credit_purchase: user=${userId} credits=${credits} pack=${packKey} session=${session.id}`);
+            } else {
+                this.logger.warn(`credit_purchase [${session.id}]: invalid credits=${session.metadata.credits}`);
+            }
+
+            // Still update stripeId if not set
+            if (session.customer) {
+                await this.prisma.user.update({
+                    where: { id: userId },
+                    data: { stripeId: session.customer },
+                }).catch(() => {});
+            }
+
+            return userId;
+        }
+
+        // ── Subscription checkout ────────────────────────────────────────────
         await this.prisma.user.update({
             where: { id: userId },
             data: { stripeId: session.customer },

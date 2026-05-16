@@ -13,6 +13,7 @@ import {
   Req,
   UnauthorizedException,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
@@ -22,7 +23,8 @@ import { AdminGuard } from './admin.guard';
 import { AdminOriginGuard } from './admin-origin.guard';
 import { AdminService } from './admin.service';
 import { BugReportsService } from '../bug-reports/bug-reports.service';
-import { BugReportStatus } from '@prisma/client';
+import { CreditService } from 'src/common/credits/credit.service';
+import { BugReportStatus, CreditTxType } from '@prisma/client';
 
 const PIN_MAX = 5;
 const PIN_WINDOW_SEC = 10 * 60; // 10 minutes
@@ -37,6 +39,7 @@ export class AdminController implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly redis: RedisService,
     private readonly bugReportsService: BugReportsService,
+    private readonly creditService: CreditService,
   ) {}
 
   onModuleInit() {
@@ -267,6 +270,44 @@ export class AdminController implements OnModuleInit {
       status,
       eventType,
     );
+  }
+
+  // ─── Credits ─────────────────────────────────────────────────────────────────
+
+  @Get('users/:id/credits')
+  @UseGuards(AdminGuard)
+  async getUserCredits(@Param('id') id: string) {
+    const balance = await this.creditService.getBalance(id);
+    const history = await this.creditService.getHistory(id, 20);
+    return { balance, history };
+  }
+
+  @Post('users/:id/credits')
+  @UseGuards(AdminGuard)
+  async adjustUserCredits(
+    @Param('id') id: string,
+    @Body() body: { amount: number; type?: string; reason: string },
+  ) {
+    const amount = Number(body.amount);
+    if (!amount || isNaN(amount)) throw new BadRequestException('amount must be a non-zero number');
+    if (!body.reason?.trim()) throw new BadRequestException('reason is required');
+    const type = (body.type as CreditTxType) || CreditTxType.ADMIN_ADJUST;
+    const result = await this.creditService.add(id, Math.abs(amount), type, body.reason);
+    this.logger.log(`[admin] credits: ${type} ${amount} to ${id} (${body.reason})`);
+    return result;
+  }
+
+  @Get('credits/analytics')
+  @UseGuards(AdminGuard)
+  getCreditAnalytics() {
+    return this.adminService.getCreditAnalytics();
+  }
+
+  @Post('credits/invalidate-cache')
+  @UseGuards(AdminGuard)
+  invalidateCreditCache() {
+    this.creditService.invalidateCostCache();
+    return { ok: true };
   }
 
   // ─── App Config ──────────────────────────────────────────────────────────────

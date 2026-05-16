@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Body,
+  Req,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -15,6 +16,8 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { PlanService, RESOURCE_TYPES } from 'src/common/plans';
+import { CreditService } from 'src/common/credits/credit.service';
 import { BriaService } from './bria.service';
 import { RemoveBackgroundDto } from './dto/remove-background.dto';
 
@@ -25,7 +28,11 @@ import { RemoveBackgroundDto } from './dto/remove-background.dto';
 export class BriaController {
   private readonly logger = new Logger(BriaController.name);
 
-  constructor(private readonly bria: BriaService) {}
+  constructor(
+    private readonly bria: BriaService,
+    private readonly planService: PlanService,
+    private readonly creditService: CreditService,
+  ) {}
 
   @Post('remove-background')
   @HttpCode(HttpStatus.OK)
@@ -52,8 +59,18 @@ export class BriaController {
   @ApiResponse({ status: 429, description: 'Bria API rate limit exceeded' })
   @ApiResponse({ status: 503, description: 'Bria API not configured on this server' })
   @ApiResponse({ status: 504, description: 'Processing timed out' })
-  async removeBackground(@Body() dto: RemoveBackgroundDto) {
+  async removeBackground(
+    @Body() dto: RemoveBackgroundDto,
+    @Req() req: { user: { userId: string } },
+  ) {
+    const { userId } = req.user;
     this.logger.log(`[remove_bg] image=${dto.image.slice(0, 80)}...`);
-    return this.bria.removeBackground(dto.image);
+    await this.creditService.grantMonthlyCredits(userId);
+    const cost = await this.creditService.getCost('remove_bg');
+    await this.creditService.check(userId, cost);
+    const result = await this.bria.removeBackground(dto.image);
+    await this.planService.logUsage(userId, RESOURCE_TYPES.REMOVE_BG, 1);
+    await this.creditService.deduct(userId, cost, 'remove_bg', RESOURCE_TYPES.REMOVE_BG);
+    return result;
   }
 }

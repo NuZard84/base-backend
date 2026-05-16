@@ -4,6 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { PlanService } from '../../common/plans/plan.service';
+import { CreditService } from '../../common/credits/credit.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('User')
@@ -13,6 +14,7 @@ export class UserController {
   constructor(
     private userService: UserService,
     private planService: PlanService,
+    private creditService: CreditService,
   ) { }
 
   @Get('me')
@@ -69,6 +71,28 @@ export class UserController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   getMyUsage(@Req() req) {
     return this.planService.getUsageSummary(req.user.userId);
+  }
+
+  // ─── Credit Endpoints ────────────────────────────────────────────────────────
+
+  @Get('me/credits')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get current credit balance' })
+  @ApiResponse({ status: 200, description: 'Returns current credit balance' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async getMyCredits(@Req() req) {
+    await this.creditService.grantMonthlyCredits(req.user.userId);
+    const balance = await this.creditService.getBalance(req.user.userId);
+    return { balance };
+  }
+
+  @Get('me/credits/history')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get credit transaction history (last 50)' })
+  @ApiResponse({ status: 200, description: 'Returns recent credit transactions' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  getMyCreditsHistory(@Req() req) {
+    return this.creditService.getHistory(req.user.userId, 50);
   }
 }
 

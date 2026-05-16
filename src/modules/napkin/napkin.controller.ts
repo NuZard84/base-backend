@@ -15,6 +15,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiParam, ApiQuery } from '@nestj
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { NapkinService } from './napkin.service';
 import { PlanService } from '../../common/plans/plan.service';
+import { CreditService } from '../../common/credits/credit.service';
 import { RESOURCE_TYPES } from '../../common/plans/plan-config';
 import { GenerateVisualDto } from './dto/generate-visual.dto';
 
@@ -26,6 +27,7 @@ export class NapkinController {
     constructor(
         private readonly napkinService: NapkinService,
         private readonly planService: PlanService,
+        private readonly creditService: CreditService,
     ) {}
 
     @Post('generate')
@@ -34,11 +36,15 @@ export class NapkinController {
         const userId = req.user?.userId ?? req.user?.id;
         await this.planService.requireFeature(userId, 'vizoraInfographic');
         await this.planService.checkLimit(userId, 'vizora_gen');
+        await this.creditService.grantMonthlyCredits(userId);
+        const cost = await this.creditService.getCost('vizora_gen');
+        await this.creditService.check(userId, cost);
         const result = await this.napkinService.createVisualRequest(dto);
         await this.planService.logUsage(userId, RESOURCE_TYPES.VIZORA_GEN, 1, {
             requestId: result.request_id,
             numVisuals: dto.number_of_visuals ?? 1,
         });
+        await this.creditService.deduct(userId, cost, 'vizora_gen', RESOURCE_TYPES.VIZORA_GEN);
         return result;
     }
 

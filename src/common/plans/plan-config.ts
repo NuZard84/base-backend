@@ -11,6 +11,7 @@ export interface PlanLimits {
   maxNodesPerCanvas: number;
   maxCollaboratorsPerCanvas: number; // -1 = unlimited
   maxVizoraPerMonth: number;
+  maxCreditsPerMonth: number; // monthly credit grant — overridable from admin panel
 }
 
 export interface PlanFeatures {
@@ -20,6 +21,7 @@ export interface PlanFeatures {
   ragDocumentUpload: boolean;
   advancedAiModels: boolean;
   imageGeneration: boolean;
+  videoGeneration: boolean; // requires paid plan (PLUS/PRO)
   prioritySupport: boolean;
   importChat: boolean;
   vizoraInfographic: boolean;
@@ -57,6 +59,9 @@ export const RESOURCE_TYPES = {
   FILE_UPLOAD: 'file_upload',
   DOCUMENT_UPLOAD: 'document_upload',
   VIZORA_GEN: 'vizora_gen',
+  VIDEO_GEN: 'video_gen',
+  REMOVE_BG: 'remove_bg',
+  TEXT_EDITOR: 'text_editor',
 } as const;
 
 // Limit type identifiers used by @CheckLimit decorator
@@ -67,7 +72,8 @@ export type LimitType =
   | 'storage'
   | 'nodes_per_canvas'
   | 'collaborators'
-  | 'vizora_gen';
+  | 'vizora_gen'
+  | 'credits';
 
 // Feature keys used by @RequireFeature decorator
 export type FeatureKey = keyof PlanFeatures;
@@ -89,6 +95,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxNodesPerCanvas: 250,  // cap prevents a free user from OOM-ing the Cloud Run instance
       maxCollaboratorsPerCanvas: 2,
       maxVizoraPerMonth: 0,
+      maxCreditsPerMonth: 50,
     },
     features: {
       collaboration: true,
@@ -98,6 +105,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
 
       advancedAiModels: false,
       imageGeneration: true, // FREE gets 4/month (capped by maxImageGenPerMonth limit)
+      videoGeneration: false,
       prioritySupport: false,
       importChat: false,
       vizoraInfographic: false,
@@ -120,6 +128,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxNodesPerCanvas: -1,          // unlimited — no conflict when trial ends
       maxCollaboratorsPerCanvas: 2,   // SAME as FREE — no conflict when trial ends
       maxVizoraPerMonth: 2,
+      maxCreditsPerMonth: 150,
     },
     features: {
       collaboration: true,
@@ -129,6 +138,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
 
       advancedAiModels: false,
       imageGeneration: true,
+      videoGeneration: false,
       prioritySupport: false,
       importChat: false,
       vizoraInfographic: true,
@@ -151,6 +161,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 10,
       maxVizoraPerMonth: 50,
+      maxCreditsPerMonth: 1500,
     },
     features: {
       collaboration: true,
@@ -160,6 +171,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
 
       advancedAiModels: true,
       imageGeneration: true,
+      videoGeneration: true,
       prioritySupport: false,
       importChat: true,
       vizoraInfographic: true,
@@ -182,6 +194,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: -1,
       maxVizoraPerMonth: 120,
+      maxCreditsPerMonth: 5000,
     },
     features: {
       collaboration: true,
@@ -191,6 +204,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
 
       advancedAiModels: true,
       imageGeneration: true,
+      videoGeneration: true,
       prioritySupport: true,
       importChat: true,
       vizoraInfographic: true,

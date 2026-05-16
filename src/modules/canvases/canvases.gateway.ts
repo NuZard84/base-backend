@@ -16,6 +16,7 @@ import { CanvasSharesService } from './canvas-shares/canvas-shares.service';
 import { CanvasCollabService, UserPresence } from './canvas-collab.service';
 import { PrismaService } from 'prisma/prisma.service';
 import { CanvasRole } from '@prisma/client';
+import { SocketService } from 'src/common/socket/socket.service';
 import type {
     CanvasOpPayload,
     CursorMovePayload,
@@ -43,9 +44,13 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         private canvasSharesService: CanvasSharesService,
         private collabService: CanvasCollabService,
         private prisma: PrismaService,
+        private socketService: SocketService,
     ) {}
 
     afterInit() {
+        // Register the server with SocketService so CreditService can push events
+        this.socketService.setServer(this.server);
+
         // Wire the sync-error callback so the collab service can broadcast
         // to a canvas room when all DB flush retries are exhausted.
         this.collabService.onSyncError = (payload) => {
@@ -68,6 +73,8 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
             client.data.userId = payload.sub as string;
             client.data.canvasIds = new Set<string>();
+            // Private user room — used for credit balance pushes
+            void client.join(`user:${payload.sub}`);
             this.logger.log(`Connected: ${client.id} (user=${payload.sub})`);
         } catch (e) {
             this.logger.warn(`Auth failed for ${client.id}: ${e.message}`);

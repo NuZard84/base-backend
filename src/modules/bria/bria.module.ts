@@ -5,9 +5,11 @@ import { BriaService } from './bria.service';
 import { BriaApiService } from './bria-api.service';
 import { BriaPollerService } from './bria-poller.service';
 import { AttachmentsModule } from '../attachments/attachments.module';
+import { PlanModule } from 'src/common/plans';
+import { CreditModule } from 'src/common/credits/credit.module';
 
 @Module({
-  imports: [ConfigModule, AttachmentsModule],
+  imports: [ConfigModule, AttachmentsModule, PlanModule, CreditModule],
   controllers: [BriaController],
   providers: [BriaApiService, BriaPollerService, BriaService],
   exports: [BriaService],

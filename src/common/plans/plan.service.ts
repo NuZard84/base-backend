@@ -20,6 +20,7 @@ export interface UserPlanDetails {
   actualTier: string;
   status: string;
   nextBillingAt: string | null;
+  creditBalance: number;
   trial: {
     active: boolean;
     tier: string | null;
@@ -418,7 +419,7 @@ export class PlanService {
   async getUserPlanDetails(userId: string): Promise<UserPlanDetails> {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { plan: true, status: true, trialEndsAt: true, trialTier: true },
+      select: { plan: true, status: true, trialEndsAt: true, trialTier: true, creditBalance: true },
     });
 
     // A paid plan always supersedes any active trial — guard against stale
@@ -460,6 +461,7 @@ export class PlanService {
       actualTier: user.plan,
       status: user.status,
       nextBillingAt,
+      creditBalance: user.creditBalance,
       trial: {
         active: isTrialActive,
         tier: user.trialTier,

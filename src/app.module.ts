@@ -21,6 +21,8 @@ import { PrePromptsModule } from './modules/pre-prompts/pre-prompts.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { PlanModule } from './common/plans/plan.module';
+import { CreditModule } from './common/credits/credit.module';
+import { SocketModule } from './common/socket/socket.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { StripeModule } from './modules/stripe/stripe.module';
 import { BugReportsModule } from './modules/bug-reports/bug-reports.module';
@@ -49,7 +51,9 @@ import { AiImageModule } from './modules/ai-image/ai-image.module';
       },
     ]),
     PrismaModule,
+    SocketModule,
     PlanModule,
+    CreditModule,
     AuthModule,
     UserModule,
     HealthModule,

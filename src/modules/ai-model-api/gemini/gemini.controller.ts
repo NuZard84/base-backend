@@ -6,6 +6,7 @@ import { PlanGuard } from '../../../common/plans/plan.guard';
 import { CheckLimit, RequireFeature } from '../../../common/plans/plan.decorator';
 import { PlanService } from '../../../common/plans/plan.service';
 import { RESOURCE_TYPES, FREE_TIER_AI_MODELS } from '../../../common/plans/plan-config';
+import { CreditService } from '../../../common/credits/credit.service';
 import { Throttle } from '@nestjs/throttler';
 
 import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto } from '../types';
@@ -18,6 +19,7 @@ export class GeminiController {
     constructor(
         private readonly geminiService: GeminiService,
         private readonly planService: PlanService,
+        private readonly creditService: CreditService,
     ) { }
 
     @Post('generate')
@@ -65,20 +67,32 @@ export class GeminiController {
         },
     })
     async generate(@Body() body: { data: AiRequestData; config?: AiRequestConfig }, @Request() req: any) {
+        const userId: string = req.user.userId;
         const requestedModel = body.config?.model || 'gemini-2.0-flash-lite';
         if (!FREE_TIER_AI_MODELS.has(requestedModel)) {
-            // Model requires advancedAiModels feature — enforce on the backend
-            await this.planService.requireFeature(req.user.userId, 'advancedAiModels');
+            await this.planService.requireFeature(userId, 'advancedAiModels');
         }
+        await this.creditService.grantMonthlyCredits(userId);
+        const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
+        await this.creditService.check(userId, costPer1k); // minimum 1k tokens cost pre-check
         const result = await this.geminiService.generateContent(body.data, body.config);
-        // Log usage after successful generation — include token count when available
+        const tokens = result.tokenUsage?.totalTokens ?? 0;
         await this.planService.logUsage(
-            req.user.userId,
+            userId,
             RESOURCE_TYPES.AI_REQUEST,
             1,
-            { model: body.config?.model || 'gemini-2.0-flash-lite' },
-            result.tokenUsage?.totalTokens,
+            { model: requestedModel },
+            tokens,
         );
+        if (tokens > 0) {
+            const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
+            await this.creditService.deduct(
+                userId,
+                Math.ceil(tokens / 1000) * costPer1k,
+                `ai_request:${requestedModel}`,
+                RESOURCE_TYPES.AI_REQUEST,
+            );
+        }
         return result;
     }
 
@@ -92,9 +106,22 @@ export class GeminiController {
         if (!body.prompt?.trim()) {
             throw new BadRequestException('prompt must not be empty');
         }
-        // Note: usage logging is done inside geminiService.generateImage (fire-and-forget)
+        const userId: string = req.user?.userId;
+        await this.creditService.grantMonthlyCredits(userId);
+        const costPerImage = await this.creditService.getCost('image_gen');
+        const expectedCount = body.numberOfImages ?? 1;
+        await this.creditService.check(userId, costPerImage * expectedCount);
+        // Usage logging is done inside geminiService.generateImage (fire-and-forget)
         // to include the actual number of images generated. Do NOT log here again.
-        return this.geminiService.generateImage({ ...body, userId: req.user?.userId });
+        const result = await this.geminiService.generateImage({ ...body, userId });
+        const imageCount = result.images?.length ?? 1;
+        await this.creditService.deduct(
+            userId,
+            imageCount * costPerImage,
+            'image_gen',
+            RESOURCE_TYPES.IMAGE_GEN,
+        );
+        return result;
     }
 
     @Get('search')
@@ -114,15 +141,28 @@ export class GeminiController {
         if (!q?.trim()) {
             throw new BadRequestException('Query parameter "q" must not be empty.');
         }
+        const userId: string = req.user.userId;
+        await this.creditService.grantMonthlyCredits(userId);
+        const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
+        await this.creditService.check(userId, costPer1k);
         const result = await this.geminiService.getRealTimeData(q.trim());
-        // Log search as AI request usage — include token count when available
+        const tokens = result.tokenUsage?.totalTokens ?? 0;
         await this.planService.logUsage(
-            req.user.userId,
+            userId,
             RESOURCE_TYPES.AI_REQUEST,
             1,
             { type: 'search', query: q.substring(0, 100) },
-            result.tokenUsage?.totalTokens,
+            tokens,
         );
+        if (tokens > 0) {
+            const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
+            await this.creditService.deduct(
+                userId,
+                Math.ceil(tokens / 1000) * costPer1k,
+                'ai_request:search',
+                RESOURCE_TYPES.AI_REQUEST,
+            );
+        }
         return result;
     }
 }

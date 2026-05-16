@@ -20,6 +20,8 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { PlanGuard, RequireFeature, PlanService, RESOURCE_TYPES } from 'src/common/plans';
+import { CreditService } from 'src/common/credits/credit.service';
 import { KlingService } from './kling.service';
 import { TextToVideoDto } from './dto/text-to-video.dto';
 import { ImageToVideoDto } from './dto/image-to-video.dto';
@@ -32,26 +34,54 @@ import { CostEstimateQueryDto } from './dto/cost-estimate.dto';
 export class KlingController {
   private readonly logger = new Logger(KlingController.name);
 
-  constructor(private readonly kling: KlingService) {}
+  constructor(
+    private readonly kling: KlingService,
+    private readonly planService: PlanService,
+    private readonly creditService: CreditService,
+  ) {}
 
   // ─── Text-to-video ──────────────────────────────────────────────────────────
 
   @Post('text-to-video')
   @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(PlanGuard)
+  @RequireFeature('videoGeneration')
   @ApiOperation({ summary: 'Submit a text-to-video generation task (async)' })
   @ApiResponse({ status: 202, description: 'Task accepted — poll /video/task/:task_id for status' })
-  async textToVideo(@Body() dto: TextToVideoDto) {
-    return this.kling.createTextToVideoTask(dto);
+  @ApiResponse({ status: 403, description: 'Feature unavailable on current plan' })
+  async textToVideo(@Body() dto: TextToVideoDto, @Req() req: { user: { userId: string } }) {
+    const { userId } = req.user;
+    await this.creditService.grantMonthlyCredits(userId);
+    const cost = await this.creditService.getCost(this.creditService.videoGenCostKey(dto.mode, dto.duration));
+    await this.creditService.check(userId, cost);
+    const result = await this.kling.createTextToVideoTask(dto);
+    await this.planService.logUsage(userId, RESOURCE_TYPES.VIDEO_GEN, 1, {
+      model: dto.model, mode: dto.mode, duration: dto.duration, type: 'text-to-video',
+    });
+    await this.creditService.deduct(userId, cost, `video_gen:${dto.mode}:${dto.duration}`, RESOURCE_TYPES.VIDEO_GEN);
+    return result;
   }
 
   // ─── Image-to-video ─────────────────────────────────────────────────────────
 
   @Post('image-to-video')
   @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(PlanGuard)
+  @RequireFeature('videoGeneration')
   @ApiOperation({ summary: 'Submit an image-to-video generation task (async)' })
   @ApiResponse({ status: 202, description: 'Task accepted — poll /video/task/:task_id for status' })
-  async imageToVideo(@Body() dto: ImageToVideoDto) {
-    return this.kling.createImageToVideoTask(dto);
+  @ApiResponse({ status: 403, description: 'Feature unavailable on current plan' })
+  async imageToVideo(@Body() dto: ImageToVideoDto, @Req() req: { user: { userId: string } }) {
+    const { userId } = req.user;
+    await this.creditService.grantMonthlyCredits(userId);
+    const cost = await this.creditService.getCost(this.creditService.videoGenCostKey(dto.mode, dto.duration));
+    await this.creditService.check(userId, cost);
+    const result = await this.kling.createImageToVideoTask(dto);
+    await this.planService.logUsage(userId, RESOURCE_TYPES.VIDEO_GEN, 1, {
+      model: dto.model, mode: dto.mode, duration: dto.duration, type: 'image-to-video',
+    });
+    await this.creditService.deduct(userId, cost, `video_gen:${dto.mode}:${dto.duration}`, RESOURCE_TYPES.VIDEO_GEN);
+    return result;
   }
 
   // ─── Task status ────────────────────────────────────────────────────────────
@@ -67,15 +97,27 @@ export class KlingController {
   // ─── Generate-and-wait ──────────────────────────────────────────────────────
 
   @Post('generate-and-wait')
+  @UseGuards(PlanGuard)
+  @RequireFeature('videoGeneration')
   @ApiOperation({
     summary: 'Generate video and wait synchronously (polls until complete, max 5 minutes)',
     description: 'Blocks until the video is ready and returns the final URL. Times out after 5 minutes.',
   })
   @ApiResponse({ status: 200, description: 'Video generated successfully — video_url is ready to use' })
+  @ApiResponse({ status: 403, description: 'Feature unavailable on current plan' })
   @ApiResponse({ status: 504, description: 'Timed out after 5 minutes' })
   @ApiResponse({ status: 422, description: 'Generation failed or content moderation rejection' })
-  async generateAndWait(@Body() dto: TextToVideoDto) {
-    return this.kling.generateAndWait(dto);
+  async generateAndWait(@Body() dto: TextToVideoDto, @Req() req: { user: { userId: string } }) {
+    const { userId } = req.user;
+    await this.creditService.grantMonthlyCredits(userId);
+    const cost = await this.creditService.getCost(this.creditService.videoGenCostKey(dto.mode, dto.duration));
+    await this.creditService.check(userId, cost);
+    const result = await this.kling.generateAndWait(dto);
+    await this.planService.logUsage(userId, RESOURCE_TYPES.VIDEO_GEN, 1, {
+      model: dto.model, mode: dto.mode, duration: dto.duration, type: 'generate-and-wait',
+    });
+    await this.creditService.deduct(userId, cost, `video_gen:${dto.mode}:${dto.duration}`, RESOURCE_TYPES.VIDEO_GEN);
+    return result;
   }
 
   // ─── S3 persistence ────────────────────────────────────────────────────────

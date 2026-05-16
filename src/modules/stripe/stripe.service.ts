@@ -91,6 +91,11 @@ export class StripeService implements OnModuleInit {
         this.logger.log('StripeService initialized');
     }
 
+    /** Expose the raw Stripe client for one-off session creation (e.g. credit purchases). */
+    getStripeInstance() {
+        return this.stripe;
+    }
+
     // ─── Customer ──────────────────────────────────────────────────────────────
 
     /**

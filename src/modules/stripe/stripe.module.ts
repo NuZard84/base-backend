@@ -3,10 +3,11 @@ import { StripeService } from './stripe.service';
 import { StripeController } from './stripe.controller';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { EmailModule } from '../email/email.module';
+import { CreditModule } from '../../common/credits/credit.module';
 
 @Global()
 @Module({
-  imports: [PrismaModule, EmailModule],
+  imports: [PrismaModule, EmailModule, CreditModule],
   controllers: [StripeController],
   providers: [StripeService],
   exports: [StripeService],
