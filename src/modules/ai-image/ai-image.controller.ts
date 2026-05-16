@@ -79,7 +79,6 @@ export class AiImageController {
     const { userId } = req.user;
     const points = dto.parsedPoints();
     this.logger.log(`[POST /segment] ${points.length} point(s)`);
-    await this.creditService.grantMonthlyCredits(userId);
     const cost = await this.creditService.getCost('text_editor');
     await this.creditService.check(userId, cost);
     const png = await this.aiImage.segmentPreview(file, points);
@@ -113,7 +112,6 @@ export class AiImageController {
     const { userId } = req.user;
     const points = dto.parsedPoints();
     this.logger.log(`[POST /mask] ${points.length} point(s)`);
-    await this.creditService.grantMonthlyCredits(userId);
     const cost = await this.creditService.getCost('text_editor');
     await this.creditService.check(userId, cost);
     const png = await this.aiImage.binaryMask(file, points);
@@ -155,7 +153,6 @@ export class AiImageController {
     const { userId } = req.user;
     const points = dto.parsedPoints();
     this.logger.log(`[POST /alpha-mask] ${points.length} point(s)`);
-    await this.creditService.grantMonthlyCredits(userId);
     const cost = await this.creditService.getCost('text_editor');
     await this.creditService.check(userId, cost);
     const png = await this.aiImage.alphaMask(file, points);

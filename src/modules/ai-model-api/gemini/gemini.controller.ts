@@ -72,7 +72,6 @@ export class GeminiController {
         if (!FREE_TIER_AI_MODELS.has(requestedModel)) {
             await this.planService.requireFeature(userId, 'advancedAiModels');
         }
-        await this.creditService.grantMonthlyCredits(userId);
         const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
         await this.creditService.check(userId, costPer1k); // minimum 1k tokens cost pre-check
         const result = await this.geminiService.generateContent(body.data, body.config);
@@ -107,7 +106,6 @@ export class GeminiController {
             throw new BadRequestException('prompt must not be empty');
         }
         const userId: string = req.user?.userId;
-        await this.creditService.grantMonthlyCredits(userId);
         const costPerImage = await this.creditService.getCost('image_gen');
         const expectedCount = body.numberOfImages ?? 1;
         await this.creditService.check(userId, costPerImage * expectedCount);
@@ -142,7 +140,6 @@ export class GeminiController {
             throw new BadRequestException('Query parameter "q" must not be empty.');
         }
         const userId: string = req.user.userId;
-        await this.creditService.grantMonthlyCredits(userId);
         const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
         await this.creditService.check(userId, costPer1k);
         const result = await this.geminiService.getRealTimeData(q.trim());

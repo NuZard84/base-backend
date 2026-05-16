@@ -51,7 +51,6 @@ export class KlingController {
   @ApiResponse({ status: 403, description: 'Feature unavailable on current plan' })
   async textToVideo(@Body() dto: TextToVideoDto, @Req() req: { user: { userId: string } }) {
     const { userId } = req.user;
-    await this.creditService.grantMonthlyCredits(userId);
     const cost = await this.creditService.getCost(this.creditService.videoGenCostKey(dto.mode, dto.duration));
     await this.creditService.check(userId, cost);
     const result = await this.kling.createTextToVideoTask(dto);
@@ -73,7 +72,6 @@ export class KlingController {
   @ApiResponse({ status: 403, description: 'Feature unavailable on current plan' })
   async imageToVideo(@Body() dto: ImageToVideoDto, @Req() req: { user: { userId: string } }) {
     const { userId } = req.user;
-    await this.creditService.grantMonthlyCredits(userId);
     const cost = await this.creditService.getCost(this.creditService.videoGenCostKey(dto.mode, dto.duration));
     await this.creditService.check(userId, cost);
     const result = await this.kling.createImageToVideoTask(dto);
@@ -109,7 +107,6 @@ export class KlingController {
   @ApiResponse({ status: 422, description: 'Generation failed or content moderation rejection' })
   async generateAndWait(@Body() dto: TextToVideoDto, @Req() req: { user: { userId: string } }) {
     const { userId } = req.user;
-    await this.creditService.grantMonthlyCredits(userId);
     const cost = await this.creditService.getCost(this.creditService.videoGenCostKey(dto.mode, dto.duration));
     await this.creditService.check(userId, cost);
     const result = await this.kling.generateAndWait(dto);

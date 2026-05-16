@@ -65,7 +65,6 @@ export class BriaController {
   ) {
     const { userId } = req.user;
     this.logger.log(`[remove_bg] image=${dto.image.slice(0, 80)}...`);
-    await this.creditService.grantMonthlyCredits(userId);
     const cost = await this.creditService.getCost('remove_bg');
     await this.creditService.check(userId, cost);
     const result = await this.bria.removeBackground(dto.image);

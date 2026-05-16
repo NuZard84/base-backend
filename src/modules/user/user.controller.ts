@@ -81,7 +81,6 @@ export class UserController {
   @ApiResponse({ status: 200, description: 'Returns current credit balance' })
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async getMyCredits(@Req() req) {
-    await this.creditService.grantMonthlyCredits(req.user.userId);
     const balance = await this.creditService.getBalance(req.user.userId);
     return { balance };
   }
