@@ -15,7 +15,7 @@ export class ImageProcessorHelper {
   constructor(private readonly config: ConfigService) {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (apiKey) {
-      this.genAI = new GoogleGenAI({ apiKey });
+      this.genAI = new GoogleGenAI({ apiKey, vertexai: true });
     } else {
       this.logger.warn('GEMINI_API_KEY missing — image text extraction will be unavailable');
     }

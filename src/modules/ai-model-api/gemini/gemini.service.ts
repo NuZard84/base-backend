@@ -55,7 +55,7 @@ Follow this layout for all non-trivial queries:
     ) {
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
         if (apiKey) {
-            this.genAI = new GoogleGenAI({ apiKey });
+            this.genAI = new GoogleGenAI({ apiKey, vertexai: true });
         } else {
             this.logger.warn('GEMINI_API_KEY not found in environment variables');
         }

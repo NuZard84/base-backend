@@ -21,7 +21,7 @@ export class GeminiSummarizeProvider implements ISummarizeProvider {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     this.isConfigured = !!apiKey;
     if (apiKey) {
-      this.genAI = new GoogleGenAI({ apiKey });
+      this.genAI = new GoogleGenAI({ apiKey, vertexai: true });
     } else {
       this.logger.warn('GEMINI_API_KEY not set — GeminiSummarizeProvider is inactive');
     }

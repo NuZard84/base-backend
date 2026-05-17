@@ -31,9 +31,7 @@ export class EmbeddingsService {
   ) {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (apiKey) {
-      // Default API version is v1beta — required for embedContent (gemini-embedding-001);
-      // forcing v1 returns NOT_FOUND for embedding models.
-      this.genAI = new GoogleGenAI({ apiKey });
+      this.genAI = new GoogleGenAI({ apiKey, vertexai: true });
     } else {
       this.logger.warn('GEMINI_API_KEY not set — EmbeddingsService inactive');
     }
