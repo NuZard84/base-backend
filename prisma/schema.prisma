@@ -128,6 +128,8 @@ model User {
   documents           Document[]
   payments            Payment[]
   bugReports          BugReport[]
+  comments            Comment[]      @relation("CommentAuthor")
+  commentReplies      CommentReply[] @relation("CommentReplyAuthor")
 
   // Email/password auth fields (null for Google-only users)
   passwordHash      String?
@@ -195,6 +197,7 @@ model Canvas {
   snapshots     CanvasSnapshot[]
   conversations AIConversation[]
   shares        CanvasShare[]
+  comments      Comment[]
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -277,6 +280,63 @@ model Edge {
   @@index([canvasId])
   @@index([sourceNodeId, targetNodeId])
   @@map("edges")
+}
+
+// Figma-style spatial canvas comments. A comment is a pin anchored at (x, y)
+// in canvas coordinates; replies thread under it. `resolved` toggles open ↔ done.
+// Soft-delete via `deletedAt` so we keep an audit trail and can offer undo later.
+model Comment {
+  id       String @id @default(uuid())
+  canvasId String
+  canvas   Canvas @relation(fields: [canvasId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  body String @db.Text
+
+  // Anchor position in canvas coordinates (NOT screen coordinates).
+  // PeerOverlay-style transforms project these to screen on render.
+  x Float
+  y Float
+
+  // Optional: bind the pin to a node so it follows when the node is moved.
+  // We don't enforce this in the MVP, but keeping the field reserves the slot.
+  anchorNodeId String?
+
+  resolved   Boolean   @default(false)
+  resolvedAt DateTime?
+  resolvedBy String?
+
+  deletedAt DateTime?
+
+  replies   CommentReply[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([canvasId, resolved, deletedAt])
+  @@index([authorId])
+  @@map("comments")
+}
+
+model CommentReply {
+  id        String  @id @default(uuid())
+  commentId String
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation("CommentReplyAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  body String @db.Text
+
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([commentId, createdAt])
+  @@map("comment_replies")
 }
 
 model CanvasShare {

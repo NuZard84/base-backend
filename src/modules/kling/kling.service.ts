@@ -235,10 +235,15 @@ export class KlingService {
   }
 
   async refreshVideoUrl(s3Key: string, userId: string): Promise<{ url: string }> {
-    // Ensure callers can only refresh their own videos
-    if (!s3Key.startsWith(`videos/${userId}/`)) {
-      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    // Validate format only: videos/{ownerUserId}/{taskId}.mp4 — no per-user lock-in.
+    // Peers in shared canvases need to refresh URLs for videos they didn't create.
+    // Access is already gated by canvas-share permissions (if you can see the node,
+    // you already have the s3Key), and the s3Key contains a non-guessable taskId.
+    if (!/^videos\/[^/]+\/[^/]+\.mp4$/.test(s3Key)) {
+      throw new HttpException('Invalid s3Key', HttpStatus.BAD_REQUEST);
     }
+    // userId retained in the signature for future audit logging
+    void userId;
     const url = await this.s3.getPresignedUrl({ key: s3Key, expiresIn: 604800, disposition: 'inline' });
     return { url };
   }

@@ -421,7 +421,7 @@ export class CanvasesService {
                 `edgesAdded=${edgesAdd.length} | edgesDeleted=${edgesDel.length}`,
         );
 
-        return this.prisma.$transaction(async (tx) => {
+        return this.runWithDeadlockRetry(() => this.prisma.$transaction(async (tx) => {
             const canvas = await tx.canvas.findUnique({
                 where: { id: canvasId },
                 select: { nodeCount: true, edgeCount: true },
@@ -471,8 +471,15 @@ export class CanvasesService {
             }
 
             if (nodesArr.length > 0) {
+                // Sort by clientId so two concurrent transactions queue lock requests in
+                // the same order — prevents the deadlock that used to happen when
+                // Promise.all submitted upserts in input order (different across requests).
+                // Prisma serializes queries on a single tx connection, so sorting the input
+                // is enough; keeping Promise.all preserves pipelined throughput so the
+                // transaction stays well under its 25s timeout even under network jitter.
+                const sortedNodes = [...nodesArr].sort((a, b) => a.id.localeCompare(b.id));
                 const upsertResults = await Promise.all(
-                    nodesArr.map(async (node) => {
+                    sortedNodes.map(async (node) => {
                         const nodeData = prepareNodeData(node, canvasId);
                         const upserted = await tx.node.upsert({
                             where: { canvasId_clientId: { canvasId, clientId: node.id } },
@@ -554,7 +561,31 @@ export class CanvasesService {
                 nodeCount: Math.max(0, nodeCount),
                 edgeCount,
             };
-        }, { timeout: 25000 });
+        }, { timeout: 25000 }));
+    }
+
+    /**
+     * Retry a transactional operation when PostgreSQL aborts it with a deadlock (40P01).
+     * Deadlocks are an expected outcome of concurrent writes touching overlapping rows;
+     * Postgres picks one transaction as the victim and the app is expected to retry it.
+     * Exponential backoff with jitter avoids two retrying clients colliding again.
+     */
+    private async runWithDeadlockRetry<T>(fn: () => Promise<T>, maxRetries = 4): Promise<T> {
+        let lastErr: unknown;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                return await fn();
+            } catch (err) {
+                const msg = (err as Error)?.message ?? '';
+                const isDeadlock = msg.includes('deadlock detected') || msg.includes('40P01');
+                if (!isDeadlock || attempt === maxRetries - 1) throw err;
+                lastErr = err;
+                const delay = 40 * Math.pow(2, attempt) + Math.random() * 60;
+                this.logger.warn(`[Sync] Deadlock on attempt ${attempt + 1}, retrying in ${Math.round(delay)}ms`);
+                await new Promise((r) => setTimeout(r, delay));
+            }
+        }
+        throw lastErr;
     }
 
     async rename(userId: string, id: string, renameDto: RenameCanvasDto) {

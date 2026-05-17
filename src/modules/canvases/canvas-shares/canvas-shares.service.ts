@@ -48,7 +48,10 @@ export class CanvasSharesService {
         return share.role;
     }
 
-    /** Assert the user has at least the given minimum role. Throws if not. */
+    /** Assert the user has at least the given minimum role. Throws if not.
+     *  The 403 payloads include a structured `code` so the frontend can
+     *  distinguish "you've been removed" from "you don't have permission for
+     *  this specific action" and suppress noisy errors during graceful kick flows. */
     async ensureCanvasAccess(
         userId: string,
         canvasId: string,
@@ -61,10 +64,20 @@ export class CanvasSharesService {
                 select: { id: true },
             });
             if (!exists) throw new NotFoundException('Canvas not found');
-            throw new ForbiddenException('You do not have access to this canvas');
+            throw new ForbiddenException({
+                code: 'CANVAS_ACCESS_REVOKED',
+                message: 'You do not have access to this canvas',
+                canvasId,
+            });
         }
         if (ROLE_RANK[role] < ROLE_RANK[minRole]) {
-            throw new ForbiddenException('Insufficient permissions');
+            throw new ForbiddenException({
+                code: 'CANVAS_INSUFFICIENT_ROLE',
+                message: 'Insufficient permissions for this action',
+                canvasId,
+                currentRole: role,
+                requiredRole: minRole,
+            });
         }
     }
 
@@ -238,7 +251,10 @@ export class CanvasSharesService {
         });
     }
 
-    /** Remove a member from the canvas. Owner can remove anyone; editors can remove themselves. */
+    /** Remove a member from the canvas.
+     *  - OWNER: can remove anyone (including other editors)
+     *  - EDITOR: can remove other COMMENTORs / VIEWERs / themselves (parity with invite)
+     *  - anyone else: can only remove themselves */
     async removeMember(
         requestingUserId: string,
         canvasId: string,
@@ -249,9 +265,20 @@ export class CanvasSharesService {
 
         const isSelf = requestingUserId === targetUserId;
         const isOwner = requesterRole === CanvasRole.OWNER;
+        const isEditor = requesterRole === CanvasRole.EDITOR;
 
-        if (!isSelf && !isOwner) {
-            throw new ForbiddenException('Only the owner can remove other members');
+        if (isSelf) {
+            // anyone can leave on their own
+        } else if (isOwner) {
+            // owner can remove anyone
+        } else if (isEditor) {
+            // editor cannot remove an owner or another editor — only lower roles
+            const targetRole = await this.getEffectiveRole(targetUserId, canvasId);
+            if (targetRole === CanvasRole.OWNER || targetRole === CanvasRole.EDITOR) {
+                throw new ForbiddenException('Editors can only remove commentors or viewers');
+            }
+        } else {
+            throw new ForbiddenException('You can only remove yourself from this canvas');
         }
 
         const share = await this.prisma.canvasShare.findUnique({

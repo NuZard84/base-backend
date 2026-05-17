@@ -48,18 +48,23 @@ export class CanvasSharesController {
     @Patch(':userId/role')
     @ApiOperation({ summary: 'Update a collaborator role (OWNER only)' })
     @ApiResponse({ status: 200, description: 'Role updated.' })
-    updateRole(
+    async updateRole(
         @Req() req,
         @Param('id') canvasId: string,
         @Param('userId') targetUserId: string,
         @Body() dto: UpdateMemberRoleDto,
     ) {
-        return this.canvasSharesService.updateMemberRole(
+        const result = await this.canvasSharesService.updateMemberRole(
             req.user.userId,
             canvasId,
             targetUserId,
             dto,
         );
+        // Push the new role to the affected user's sockets so their UI re-evaluates
+        // permissions immediately. Without this, a demoted editor would keep sending
+        // /sync calls and hit 403s until they refresh.
+        await this.canvasesGateway.notifyRoleChanged(canvasId, targetUserId, dto.role);
+        return result;
     }
 
     @Delete(':userId')

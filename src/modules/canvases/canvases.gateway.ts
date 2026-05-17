@@ -140,11 +140,20 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         await client.join(roomName);
         (client.data.canvasIds as Set<string>).add(canvasId);
 
-        // Run user lookup, seq fetch, and presence set in parallel
-        const [user, currentSeq] = await Promise.all([
-            this.prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } }),
+        // Run user lookup, seq fetch, role lookup, and presence set in parallel.
+        // The role is included in the `joined` response so the client can gate
+        // edit affordances from the moment it enters the canvas — no separate
+        // HTTP round-trip, no window where the UI guesses the role.
+        const [user, currentSeq, role] = await Promise.all([
+            this.prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true, image: true } }),
             this.collabService.getCurrentSeq(canvasId),
+            this.canvasSharesService.getEffectiveRole(userId, canvasId),
         ]);
+
+        // Cache the role per-canvas on the socket so handleCanvasOp can authorize
+        // every op in O(1) without a DB round-trip per drag-frame.
+        if (!client.data.canvasRoles) client.data.canvasRoles = new Map<string, CanvasRole>();
+        if (role) (client.data.canvasRoles as Map<string, CanvasRole>).set(canvasId, role);
 
         // Prefer stored name; fall back to email prefix (e.g. "jane" from "jane@gmail.com")
         // so peers never see the generic "Unknown" label when a user's display name is null.
@@ -155,6 +164,7 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         const presence = await this.collabService.setPresence(canvasId, userId, {
             name: displayName,
+            image: user?.image ?? null,
         });
 
         // Send presence list to the joiner
@@ -185,8 +195,8 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
         // Notify existing peers
         client.broadcast.to(roomName).emit('presence_joined', { canvasId, user: presence });
 
-        this.logger.log(`${client.id} joined canvas:${canvasId} (seq=${currentSeq})`);
-        return { event: 'joined', data: { canvasId, currentSeq } };
+        this.logger.log(`${client.id} joined canvas:${canvasId} (seq=${currentSeq}, role=${role ?? 'NONE'})`);
+        return { event: 'joined', data: { canvasId, currentSeq, role } };
     }
 
     @SubscribeMessage('leave_canvas')
@@ -200,6 +210,7 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         await client.leave(roomName);
         (client.data.canvasIds as Set<string>).delete(canvasId);
+        (client.data.canvasRoles as Map<string, CanvasRole> | undefined)?.delete(canvasId);
 
         void this.collabService.forceFlush(canvasId);
 
@@ -237,6 +248,13 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
         // Reject ops from sockets that never successfully joined this canvas room
         if (!(client.data.canvasIds as Set<string>).has(canvasId)) return;
+
+        // Authorization: only OWNER/EDITOR can mutate canvas state via WS.
+        // The HTTP /sync path enforces this already, but the WS pathway used to
+        // be wide-open — a VIEWER's custom client could broadcast ops AND have
+        // them persisted via the debounced collab flush. Cache lookup is O(1).
+        const role = (client.data.canvasRoles as Map<string, string> | undefined)?.get(canvasId);
+        if (role !== 'OWNER' && role !== 'EDITOR') return;
 
         // Per-socket rate limit: max 30 ops/sec to prevent flooding the server.
         // Node drag fires at ~60fps — this still allows fluid collaboration while
@@ -392,6 +410,37 @@ export class CanvasesGateway implements OnGatewayConnection, OnGatewayDisconnect
                     canvasId,
                     message: 'You have been removed from this canvas.',
                 });
+            }
+        }
+    }
+
+    /**
+     * Broadcast a comment lifecycle event to every socket in the canvas room.
+     * The payload shape is determined by the caller (CommentsService); this is
+     * a thin pass-through so the gateway stays the single owner of `this.server`.
+     */
+    broadcastCommentEvent(canvasId: string, event: string, payload: Record<string, unknown>) {
+        if (!this.server) {
+            this.logger.warn(`[Comments] WS server not ready, dropping broadcast: ${event}`);
+            return;
+        }
+        this.server.to(`canvas:${canvasId}`).emit(event, { canvasId, ...payload });
+    }
+
+    /**
+     * Notify the affected user's sockets that their canvas role has changed.
+     * The frontend uses this to update permissions in-place (e.g. switch the
+     * UI to read-only on EDITOR→VIEWER) without a hard kick.
+     */
+    async notifyRoleChanged(canvasId: string, targetUserId: string, newRole: CanvasRole) {
+        const sockets = await this.server.in(`canvas:${canvasId}`).fetchSockets();
+        for (const s of sockets) {
+            if (s.data.userId === targetUserId) {
+                // Update the per-socket cache so the next handleCanvasOp authorizes
+                // against the NEW role, not the role at join time.
+                const cache = s.data.canvasRoles as Map<string, CanvasRole> | undefined;
+                if (cache) cache.set(canvasId, newRole);
+                s.emit('role_changed', { canvasId, role: newRole });
             }
         }
     }

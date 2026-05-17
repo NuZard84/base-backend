@@ -41,6 +41,7 @@ export interface UserPresence {
     userId: string;
     name: string;
     color: string;
+    image?: string | null;
     cursor?: { x: number; y: number };
     selectedNodeIds?: string[];
     lastSeen: number;
@@ -359,6 +360,7 @@ export class CanvasCollabService implements OnModuleInit, OnModuleDestroy {
             userId,
             name: partial.name ?? existing?.name ?? 'User',
             color: existing?.color ?? this.assignColor(userId),
+            image: partial.image ?? existing?.image ?? null,
             cursor: partial.cursor ?? existing?.cursor,
             selectedNodeIds: partial.selectedNodeIds ?? existing?.selectedNodeIds,
             lastSeen: Date.now(),
