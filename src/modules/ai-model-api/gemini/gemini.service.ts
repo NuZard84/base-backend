@@ -555,11 +555,12 @@ Generate the 3 variant prompts now.`;
                 variantDefs.map(def =>
                     this.generateImage({
                         prompt: def.prompt,
-                        model: 'imagen-4.0-generate-001',
+                        model: 'gemini-3-pro-image-preview',
                         canvasId: dto.canvasId,
                         aspectRatio: dto.aspectRatio ?? '1:1',
                         numberOfImages: 1,
                         userId: dto.userId,
+                        referenceImageUrls: [dto.imageUrl],
                     })
                 )
             );
