@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsIn, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export const queryType = {
     VID_SUMMARIZE: 'vid_summarize'
@@ -95,5 +95,51 @@ export interface GeneratedImageItem {
 export class ImageGenResponseDto {
     success: boolean;
     images: GeneratedImageItem[];
+    error?: string;
+}
+
+// ── Variants ───────────────────────────────────────────────────────────────────
+
+export type VariantPurpose = 'marketing' | 'social' | 'ecommerce' | 'brand' | 'abtesting' | 'seasonal' | 'studio' | 'cinematic';
+
+export class VariantsRequestDto {
+    @IsString()
+    imageUrl: string;
+
+    @IsString()
+    canvasId: string;
+
+    @IsOptional()
+    @IsString()
+    aspectRatio?: string;
+
+    @IsOptional()
+    @IsIn(['marketing', 'social', 'ecommerce', 'brand', 'abtesting', 'seasonal', 'studio', 'cinematic'])
+    purpose?: VariantPurpose;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(120)
+    userTouch?: string;
+}
+
+export interface ImageAnalysis {
+    mood_vibe: string;
+    product_presentation: string;
+    lighting: string;
+    context: string;
+    technical_style: string;
+    color_palette: string[];
+}
+
+export interface VariantItem {
+    image: GeneratedImageItem;
+    label: string;
+    dimension: string;
+}
+
+export class VariantsResponseDto {
+    success: boolean;
+    variants: VariantItem[];
     error?: string;
 }

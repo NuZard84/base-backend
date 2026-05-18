@@ -9,7 +9,7 @@ import { RESOURCE_TYPES, FREE_TIER_AI_MODELS } from '../../../common/plans/plan-
 import { CreditService } from '../../../common/credits/credit.service';
 import { Throttle } from '@nestjs/throttler';
 
-import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto } from '../types';
+import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto, VariantsRequestDto, VariantsResponseDto } from '../types';
 
 @ApiTags('AI Gemini')
 @ApiBearerAuth('bearer')
@@ -119,6 +119,34 @@ export class GeminiController {
             'image_gen',
             RESOURCE_TYPES.IMAGE_GEN,
         );
+        return result;
+    }
+
+    @Post('generate-variants')
+    @UseGuards(PlanGuard)
+    @RequireFeature('imageGeneration')
+    @CheckLimit('image_gen')
+    @Throttle({ default: { limit: 2, ttl: 60000 } })
+    @ApiOperation({ summary: 'Analyze an image and generate 3 creative variants' })
+    async generateVariants(@Body() body: VariantsRequestDto, @Request() req: any): Promise<VariantsResponseDto> {
+        if (!body.imageUrl?.trim()) throw new BadRequestException('imageUrl must not be empty');
+        if (!body.canvasId?.trim()) throw new BadRequestException('canvasId must not be empty');
+
+        const userId: string = req.user?.userId;
+        const costPerImage = await this.creditService.getCost('image_gen');
+        await this.creditService.check(userId, costPerImage * 3);
+
+        const result = await this.geminiService.generateVariants({ ...body, userId });
+
+        const imageCount = result.variants?.length ?? 0;
+        if (imageCount > 0) {
+            await this.creditService.deduct(
+                userId,
+                imageCount * costPerImage,
+                'image_gen_variants',
+                RESOURCE_TYPES.IMAGE_GEN,
+            );
+        }
         return result;
     }
 
