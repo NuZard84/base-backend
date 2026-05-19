@@ -351,7 +351,7 @@ Follow this layout for all non-trivial queries:
                     parts: [
                         { inlineData: { mimeType, data: base64 } },
                         {
-                            text: `You are a senior creative director and photography analyst. Analyze this image with the technical precision required to brief a world-class photographer on recreating and creatively extending it.
+                            text: `You are a senior creative director, commercial photographer, and brand strategist. Analyze this image with the technical and strategic precision required to brief a world-class studio on recreating, extending, and commercializing it across marketing channels.
 
 Return EXACTLY this JSON — valid JSON only, no markdown, no code blocks, no preamble:
 {
@@ -365,17 +365,17 @@ Return EXACTLY this JSON — valid JSON only, no markdown, no code blocks, no pr
 
 Field specifications:
 
-mood_vibe — 2 sentences: the emotional register and psychological atmosphere. What feeling does this evoke? Warm/cold, urgent/calm, luxurious/raw, intimate/grand. Describe the sensory experience a viewer has.
+mood_vibe — 2-3 sentences: the emotional register, psychological atmosphere, and commercial energy. What instant feeling does this trigger in a viewer? Describe both the sensory experience and the purchase impulse or brand emotion it activates — warm/cold, urgent/calm, luxurious/accessible, aspirational/relatable, premium/playful.
 
-product_presentation — precise technical description: subject angle (frontal/3-quarter/profile/overhead/low-angle), distance (macro/close-up/medium/wide), depth of field treatment (tack-sharp throughout/selective bokeh/heavy bokeh), composition principle (centered/rule-of-thirds/negative space dominant/symmetrical), what the frame deliberately excludes from view.
+product_presentation — precise commercial photography description: subject category (person/product/lifestyle scene/abstract), subject angle (frontal/3-quarter/profile/overhead/low-angle/dutch-tilt), subject distance (macro detail/close-up/medium/environmental wide), depth of field treatment (tack-sharp commercial/selective focus bokeh/heavy cinematic bokeh), composition principle (centered product-hero/rule-of-thirds/negative space dominant/symmetrical/dynamic diagonal), how the composition directs viewer attention to the commercial focal point.
 
-lighting — type (natural daylight/continuous studio/strobe/mixed), direction (frontal/45-degree/side/backlit/overhead), quality (hard-edged/soft-diffused/wrapped/bounced), color temperature (warm tungsten/neutral daylight/cool blue), any signature effects (rim light/deep shadow pools/specular highlights/glowing diffusion).
+lighting — full lighting brief: source type (natural window/continuous studio/strobe/practical ambient/mixed), key light direction (frontal/45-degree Rembrandt/side dramatic/backlit rim/overhead flat/under-lighting), light quality (hard-edged specular/soft-diffused wrap/bounced fill/gradient falloff), color temperature (warm tungsten 2700-3200K/neutral daylight 5000-5500K/cool blue-white 6500K+), shadow character (deep pools/soft gradients/eliminated shadows/directional cast), any signature commercial effects (catch-lights in eyes/specular product highlights/rim separation from background/glowing product translucency).
 
-context — setting category (clean studio/lifestyle environment/outdoor location/abstract), brand register (luxury/premium-accessible/artisan/editorial/commercial), narrative intent (pure product showcase/aspirational lifestyle/documentary/artistic).
+context — commercial context brief: setting category (seamless studio infinity/lifestyle residential/outdoor natural/urban street/abstract graphic/branded environment), brand tier (ultra-luxury/premium/premium-accessible/masstige/artisan craft/editorial), commercial channel fit (DTC hero product/social content/editorial print/retail POS/brand campaign), narrative intent (pure product showcase/aspirational lifestyle/documentary real/conceptual artistic).
 
-technical_style — camera and rendering character: film vs digital feel, grain or noise presence (none/subtle/prominent), color grading style (clean neutral/matte lifted/high-contrast cinematic/desaturated editorial/richly saturated), sharpness signature, post-processing fingerprint.
+technical_style — full rendering fingerprint: film vs clean digital character, grain/noise presence (none/invisible/subtle analog/prominent filmic), color grading signature (clean true neutral/matte lifted blacks/high-contrast cinematic S-curve/desaturated editorial/richly saturated commercial/faded vintage), tonal contrast character (flat low-contrast/standard/contrasty/high-contrast dramatic), sharpness quality (ultra-sharp commercial/natural resolved/slightly soft romantic), post-processing fingerprint (minimal natural/color-story graded/heavily treated/raw documentary).
 
-color_palette — 3-5 dominant hex codes ordered by visual dominance. These become strict color anchors in generation — be precise.`,
+color_palette — 4-6 dominant hex codes ordered strictly by visual dominance in the frame. These become absolute color anchors in generation — extract from the actual image pixels with precision.`,
                         },
                     ],
                 }],
@@ -388,52 +388,52 @@ color_palette — 3-5 dominant hex codes ordered by visual dominance. These beco
 
     private readonly PURPOSE_CONTEXT: Record<string, { brief: string; v1: string; v2: string; v3: string }> = {
         marketing: {
-            brief: 'MARKETING — high-impact commercial imagery engineered to stop a scroll and drive action. Hero shots, bold value-proposition staging, aspirational energy.',
-            v1: 'MOOD: Shift to confident, aspirational energy — the image should feel premium and purchase-driving. Think luxury brand campaign meets high-street appeal.',
-            v2: 'CAMERA: Hero shot — slightly low angle (empowering), tight product framing, razor-sharp focus, shallow depth of field that draws the eye immediately to the product.',
-            v3: 'WORLD: Place the product in an aspirational lifestyle context — modern interior, urban lifestyle setting, or clean white-label studio that reads instantly as commercial hero.',
+            brief: 'MARKETING HERO — high-impact commercial imagery engineered to stop a scroll, communicate premium value, and convert a viewer into a buyer within 2 seconds. Aspirational staging, bold product-forward composition, purchase-driving energy. Think agency campaign for a premium product launch.',
+            v1: 'MOOD: Shift to confident, aspirational purchase energy — the image should feel premium, desirable, and instantly communicative of value. Warm-neutral color temperature, elevated contrast, rich shadow detail. The viewer should feel they want this product before they consciously process what it is.',
+            v2: 'CAMERA: Commercial hero shot — slight low angle (empowering the subject), tight product-forward framing, razor-sharp primary focus, ultra-shallow depth of field (f/1.4–f/2) that sculpts the subject from the background. Every centimetre of DOF falloff directs the eye with intention.',
+            v3: 'WORLD: Aspirational lifestyle context — place the subject in an environment that signals the aspirational identity of the buyer: premium modern interior with architectural detail, curated urban lifestyle setting, or ultra-clean commercial studio with precise shadow geometry. Every background element reinforces the value proposition.',
         },
         social: {
-            brief: 'SOCIAL MEDIA — thumb-stopping content native to Instagram, TikTok, and Pinterest. Vibrant, bold cropping, high visual energy optimized for small-screen impact.',
-            v1: 'MOOD: Playful, vibrant, energetic — punchy colors, youthful atmosphere, the kind of image that gets a double-tap in 0.3 seconds.',
-            v2: 'CAMERA: Crop for vertical/square formats. Dynamic angles, editorial energy, bold composition with strong foreground subject and minimal background noise.',
-            v3: 'WORLD: Trendy, culturally relevant setting — flat-lay styling, street culture backdrop, or aesthetic lifestyle moment that feels native to social feeds.',
+            brief: 'SOCIAL MEDIA CONTENT — platform-native thumb-stopping imagery for Instagram, TikTok, and Pinterest feeds. Vibrant, bold, optimized for 375px-wide viewports and 0.3-second attention windows. High visual energy with instant emotional hook. Designed to earn a double-tap or a save.',
+            v1: 'MOOD: Playful, vibrant, high-dopamine energy — punchy saturated colors within the source palette, youthful atmosphere, bold tonal contrast. The image should communicate its emotion instantly at thumbnail scale without any caption needed.',
+            v2: 'CAMERA: Feed-optimized framing — crop for vertical 4:5 or square 1:1 formats with strong central subject and bold negative space. Dynamic angles (dutch tilt, close editorial crop), high-contrast foreground-background separation, zero visual clutter competing with the primary subject.',
+            v3: 'WORLD: Culturally resonant, trend-forward setting — aesthetic flat-lay with textural props, street-culture lifestyle backdrop, or aspirational "day in the life" moment. The environment should feel authentic to the platform aesthetic: not a stock photo, but a creator-grade content image.',
         },
         ecommerce: {
-            brief: 'E-COMMERCE — conversion-optimized product photography that answers every buyer question. Clean, trustworthy, detail-forward, zero distraction.',
-            v1: 'MOOD: Clinical clarity meets approachability — clean, honest, trust-building. The buyer should feel they have seen every detail.',
-            v2: 'CAMERA: Multiple-angle coverage mindset — straight-on hero shot with optimal product framing, balanced exposure, maximum detail fidelity throughout.',
-            v3: 'WORLD: Pure studio environment — seamless white or neutral background, product-only composition. Occasionally soft shadow for depth, never background distraction.',
+            brief: 'E-COMMERCE CONVERSION — product photography engineered for maximum conversion rate on retail platforms (Amazon, Shopify, DTC storefronts). Answers every buyer question visually: what is it, how big, what does it feel like, why should I trust it. Zero distraction, maximum product truth.',
+            v1: 'MOOD: Clinical clarity meets approachability — honest, trustworthy, detail-forward without being sterile. Clean color accuracy — the product should look exactly as it will arrive. The buyer must feel they have complete visual information and zero purchase risk.',
+            v2: 'CAMERA: Hero product angle — straight-on primary view with balanced even exposure, maximum depth of field (f/8–f/11) for full product sharpness, composition that shows the product at approximately 70-80% of frame. Every material surface, texture, and edge should be crisply resolved.',
+            v3: 'WORLD: Pure studio conversion environment — seamless white or light neutral backdrop (pure white #FFFFFF or warm white #F8F5F0), product as the sole compositional element. Optional: precise drop shadow or subtle reflection beneath the product to communicate dimensionality without distraction.',
         },
         brand: {
-            brief: 'BRAND IDENTITY — cohesive, story-driven imagery that communicates brand values, personality, and long-term positioning beyond any single product.',
-            v1: 'MOOD: Brand-signature atmosphere — evoke the specific emotional territory the brand owns. Is it raw and artisan? Sleek and technological? Warm and human?',
-            v2: 'CAMERA: Editorial storytelling perspective — environmental portrait style, subject in context, medium-wide shot that shows the brand world not just the product.',
-            v3: 'WORLD: Brand-universe setting — locations, textures, and contexts that reinforce brand values. Every background element is a brand signal.',
+            brief: 'BRAND STORYTELLING — cohesive, values-driven imagery that communicates brand identity, personality, and long-term emotional positioning. Not a product shot — a brand world. Every frame should feel like it belongs to a recognisable creative system. Think campaign lookbook, not catalogue.',
+            v1: 'MOOD: Brand-signature emotional territory — identify and amplify the specific feeling the brand owns exclusively. If the source reads premium, push toward understated luxury. If artisan, push toward craft authenticity. If technical, push toward precision and control. Mood is the brand fingerprint.',
+            v2: 'CAMERA: Editorial brand perspective — environmental storytelling angle that shows subject in context (medium-wide 35mm character), depth of field that reveals the brand world while keeping the subject primary, composition with intentional negative space that communicates brand confidence.',
+            v3: 'WORLD: Brand universe environment — locations, surfaces, textures, and context elements that are unmistakably on-brand. Every background detail is a brand signal: the materials, the light quality, the cultural context. The setting should make the brand identity legible without any logo present.',
         },
         abtesting: {
-            brief: 'A/B TESTING — maximally differentiated variants for rigorous performance comparison. Each variant makes a distinct creative hypothesis. No two look alike.',
-            v1: 'MOOD: Hypothesis A — warm, emotional, story-driven atmosphere. High-warmth color grading, soft light, intimate human energy.',
-            v2: 'CAMERA: Hypothesis B — radically different perspective from the source. If original is close-up, go wide. If frontal, go profile. Maximum compositional contrast.',
-            v3: 'WORLD: Hypothesis C — entirely different environment from the source. Swap indoor for outdoor, studio for lifestyle, abstract for concrete. Test the context assumption.',
+            brief: 'A/B CREATIVE TESTING — maximally differentiated variants for rigorous conversion performance comparison. Each variant embodies a distinct, testable creative hypothesis with clear independent variable. These must look completely different from each other — not color variations of the same composition.',
+            v1: 'MOOD HYPOTHESIS: Test emotional warmth vs. authority — warm, emotionally resonant atmosphere with soft high-warmth light (3000K), intimate human energy, story-driven color grading. Hypothesis: emotional connection drives conversion.',
+            v2: 'CAMERA HYPOTHESIS: Test composition radically — if the source is close-up, execute a wide environmental shot; if frontal, execute profile or overhead. Maximum compositional contrast from the source image. Hypothesis: perspective and distance changes relative perceived value.',
+            v3: 'WORLD HYPOTHESIS: Test context assumption entirely — swap the complete environment type: studio for outdoor lifestyle, abstract for concrete location, solitary product for human-in-use context. Hypothesis: context and lifestyle association changes purchase intent.',
         },
         seasonal: {
-            brief: 'SEASONAL / CAMPAIGN — time-bound imagery that connects the product to a specific moment, season, or cultural event. Strong seasonal atmosphere and cultural relevance.',
-            v1: 'MOOD: Seasonal emotional resonance — capture the specific feeling of the season: summer freedom, winter warmth, autumn nostalgia, spring freshness.',
-            v2: 'CAMERA: Campaign-ready framing — cinematic composition with seasonal atmospheric depth. Use seasonal light: golden summer haze, crisp winter clarity, moody autumn.',
-            v3: 'WORLD: Seasonal environment fully realized — seasonal props, natural elements, lighting conditions and settings that are unmistakably time-anchored.',
+            brief: 'SEASONAL CAMPAIGN — time-anchored imagery that forges an emotional connection between the product and a specific season, moment, or cultural event. The season should be felt immediately — not described, experienced. Creates urgency and time-bound desire.',
+            v1: 'MOOD: Deep seasonal emotional resonance — distill the psychological essence of the season into color, light, and atmosphere: summer freedom and golden warmth, winter intimacy and candlelit comfort, autumn nostalgia and rich amber decay, spring renewal and fresh softness. The product inherits the season\'s emotional power.',
+            v2: 'CAMERA: Campaign-cinematic framing — wide-to-medium seasonal establishing shot with atmospheric depth, seasonal bokeh, and time-of-day-appropriate light. Golden hour summer haze at f/2, crisp winter overcast at f/5.6, low-angle autumn sun at f/1.8. Let the light tell the season.',
+            v3: 'WORLD: Seasonal environment fully realized — seasonal props, botanical elements, architectural contexts, and environmental conditions that are unmistakably month-specific. Nothing generic, nothing stock-photo seasonal: specific, concrete, immersive. The product belongs here naturally.',
         },
         studio: {
-            brief: 'STUDIO PHOTOSHOOT — polished, controlled professional photography achieved in a purpose-built studio. Think editorial magazine spreads, high-fashion product tables, and luxury brand campaigns. Every light source is intentional; every shadow is placed.',
-            v1: 'MOOD: Studio signature atmosphere — shift between three distinct studio moods: (A) high-key clean white seamless with crisp catch-lights; (B) low-key dramatic black seamless with single hard key light and deep shadows; (C) warm mid-tone seamless with large soft-box wrap.',
-            v2: 'CAMERA: Classic studio technique — vary between (A) eye-level medium shot on 85mm for product intimacy; (B) slightly elevated three-quarter angle showing dimensionality; (C) flat-on overhead "lay-flat" style for graphic composition. Studio marks on floor imply precise, repeatable setups.',
-            v3: 'WORLD: Studio set design — vary the constructed environment within the studio: (A) pure seamless infinity curve, no props; (B) styled product table with curated surface textures (marble, wood, brushed metal); (C) minimal editorial set with geometric blocks or fabric drape creating architectural depth.',
+            brief: 'PROFESSIONAL STUDIO PHOTOSHOOT — polished, controlled commercial photography in a purpose-built studio. Think editorial magazine spreads for luxury brands, high-fashion product tables, and prestige campaign imagery. Every light source is intentional, every shadow is placed, every surface texture is a decision.',
+            v1: 'MOOD: Studio lighting signature — explore three controlled studio atmospheres: (A) high-key clean white seamless — maximum fill, crisp catch-lights, clean specular highlights, elevated professional clinical; (B) low-key black seamless — single hard key light, deep inky shadows, dramatic product isolation; (C) warm mid-tone seamless — large soft-box wrap, gentle gradients, editorial luxury warmth.',
+            v2: 'CAMERA: Precision studio technique — vary the classic studio angles: (A) eye-level 85mm intimate medium shot, subject fills 60-70% of frame; (B) slightly elevated 3-quarter angle at 50mm showing product dimensionality and depth; (C) flat-on overhead lay-flat perspective at 100mm for graphic product composition. Studio floor marks imply repeatable, precise setups.',
+            v3: 'WORLD: Curated studio set design — vary the controlled environment: (A) pure seamless infinity curve, zero props, product only; (B) styled product table with deliberate surface texture — polished white marble, oiled dark walnut, brushed gunmetal steel; (C) minimal editorial geometric set with architectural blocks, fabric drape, or botanical element creating intentional depth without distraction.',
         },
         cinematic: {
-            brief: 'CINEMATIC PHOTOSHOOT — imagery with the visual grammar of premium film and television. Motion picture color science, anamorphic lens character, intentional grain, and narrative depth of field. Every frame feels like a still from a prestige production.',
-            v1: 'MOOD: Cinematic emotional register — choose one: (A) golden-hour Hollywood warmth — rich amber tones, lens flare, haze in the air, the feeling of an American road movie; (B) cool Nordic noir — desaturated blue-grey palette, flat soft overcast light, austere and melancholic; (C) neon-soaked neo-noir — deep shadows, practical light sources (neon, tungsten), high contrast.',
-            v2: 'CAMERA: Anamorphic cinema language — simulate anamorphic 2.39:1 aspect ratio character: bokeh ovals, horizontal lens flare streaks, slight barrel distortion at edges. Use (A) close telephoto compression, (B) deep-focus wide establishing, or (C) handheld intimate medium. Add subtle film grain (ISO 800–3200 character).',
-            v3: 'WORLD: Cinematic location — pull the subject into a world that reads as a film set: (A) rain-slicked nighttime street, wet pavement reflections, practical street lamp glow; (B) sun-drenched open landscape, sparse, wide horizon, dust in the air; (C) interior location with strong window light, dramatic shadow geometry cutting across the frame.',
+            brief: 'CINEMATIC PHOTOGRAPHY — imagery with the full visual language of premium feature film and prestige television. Motion picture color science, anamorphic lens optical character, intentional ISO grain, and narrative depth of field. Every frame should feel like a unit still from a prestige production with a $100M budget.',
+            v1: 'MOOD: Cinematic emotional register — choose one fully committed grade: (A) golden-hour Hollywood warmth — rich amber-orange tones, anamorphic lens flare, atmospheric haze, the sun-soaked feeling of an American prestige drama; (B) cool Nordic noir — desaturated blue-grey palette with lifted blacks, flat overcast light, austere and contemplative; (C) neon-soaked neo-noir night — deep blacks, practical neon and tungsten practicals, extreme contrast ratio, rain-wet surfaces.',
+            v2: 'CAMERA: Anamorphic cinema optics — simulate the full anamorphic character: oval bokeh, horizontal lens-flare streaks, slight barrel distortion at frame edges, cinematic 2.39:1 widescreen framing. Select: (A) long telephoto compression (200mm+) collapsing background and subject; (B) deep-focus Kubrickian wide (24mm) with extreme foreground-to-background sharpness; (C) handheld intimate medium (50mm) with organic camera movement suggestion. Film grain at ISO 1600-3200 character is mandatory.',
+            v3: 'WORLD: Cinematic production location — pull the subject into a fully realized film-set environment: (A) rain-slicked nighttime city street, wet pavement mirror reflections, practical street lamp pools of light, deep background falloff; (B) sun-drenched open landscape at magic hour, sparse horizon, atmospheric dust and haze, desolate American sublime; (C) interior practical-light location — dramatic window light geometry cutting hard shadows across architectural surfaces, shadow and highlight contrast at 10:1 ratio.',
         },
     };
 
@@ -450,51 +450,53 @@ color_palette — 3-5 dominant hex codes ordered by visual dominance. These beco
             ? `User creative direction: "${userTouch}". Weave this as a soft nudge across all 3 prompts — it steers without overriding dimension rules or the color law.`
             : 'No user direction provided — rely entirely on the analysis and purpose brief to make all creative decisions.';
 
-        const systemPrompt = `You are a world-class image generation prompt engineer with deep expertise in Imagen 4 by Google DeepMind. Your prompts are used by top creative studios and consistently produce exceptional results.
+        const systemPrompt = `You are the world's foremost image generation prompt engineer, with deep mastery of Imagen 4 Ultra and Gemini Pro image models. Your prompts are the benchmark used by tier-1 creative agencies, DTC brand studios, and performance marketing teams. Every prompt you write produces exceptional commercial-grade imagery on the first generation.
 
-Your task: write exactly 3 variant image generation prompts from a detailed source image analysis. Each variant explores ONE creative dimension while holding all others constant — and every creative decision is purpose-driven by the campaign brief below.
+Your task: write exactly 3 variant image generation prompts derived from a detailed source image analysis. Each variant isolates and explores ONE creative dimension while holding all others constant — and every single creative decision is purpose-driven by the commercial campaign brief below. These prompts must produce images that are immediately usable in real marketing, social, or brand contexts.
 
-━━━ PURPOSE BRIEF ━━━
+━━━ CAMPAIGN PURPOSE BRIEF ━━━
 ${ctx.brief}
-This purpose is your north star. Every creative decision — mood, camera, environment — must serve this intent.
+This is your commercial north star. Every creative decision — mood, camera treatment, environment — must serve this specific business intent and produce imagery that works for this exact use case.
 
-━━━ DIMENSION RULES ━━━
+━━━ DIMENSION ISOLATION RULES ━━━
 
-VARIANT 1 — MOOD & ATMOSPHERE
-Preserve: subject identity, composition framing, camera angle, product presentation, lighting setup
-Shift: emotional tone, atmospheric feel, color grading, ambient energy
-Purpose directive: ${ctx.v1}
+VARIANT 1 — MOOD & ATMOSPHERE DIMENSION
+What you MUST preserve: subject identity, core composition framing, camera angle and distance, product presentation geometry, existing lighting direction and setup
+What you MUST shift: emotional tone and register, atmospheric color grading, ambient energy and feeling, tonal contrast character, psychological resonance
+Commercial directive: ${ctx.v1}
 
-VARIANT 2 — CAMERA & PRESENTATION
-Preserve: mood direction, subject identity, lighting quality, color palette
-Shift: camera angle, lens character, subject distance, depth of field, compositional framing
-Purpose directive: ${ctx.v2}
+VARIANT 2 — CAMERA & PRESENTATION DIMENSION
+What you MUST preserve: mood direction and emotional register, subject identity and characteristics, lighting quality and color temperature, dominant color palette
+What you MUST shift: camera angle, lens character and focal length, subject-to-camera distance, depth of field treatment, compositional framing and negative space distribution
+Commercial directive: ${ctx.v2}
 
-VARIANT 3 — WORLD & CONTEXT
-Preserve: subject identity, mood direction, photographic style, lighting character
-Shift: environment, setting, background, surrounding narrative
-Purpose directive: ${ctx.v3}
+VARIANT 3 — WORLD & CONTEXT DIMENSION
+What you MUST preserve: subject identity and core characteristics, established mood direction, photographic style and rendering quality, lighting character and color temperature
+What you MUST shift: environment, setting, background narrative, contextual story, surrounding elements and props
+Commercial directive: ${ctx.v3}
 
-━━━ HARD LAWS ━━━
-COLOR LAW: Every prompt MUST explicitly preserve the dominant palette [${colorDescription}]. Use the exact phrase: "maintaining the signature [describe palette character] color palette". Only override if user direction explicitly requests a color change.
-SELF-CONTAINED: Each prompt is fully self-contained. Never write "same as original", "as before", or "like the source". Describe everything from scratch as if briefing a photographer who has never seen the source.
-SUBJECT FIDELITY: The core subject/product must remain unmistakably itself.
-USER DIRECTION: ${userTouchInstruction}
+━━━ NON-NEGOTIABLE LAWS ━━━
+COLOR ANCHOR LAW: Every prompt MUST explicitly preserve the dominant color palette [${colorDescription}]. State: "maintaining the signature [describe the palette character in 3-5 words] color palette anchored in [dominant hex]". Override ONLY if user direction explicitly requests a color shift.
+SELF-CONTAINED BRIEFS: Every prompt stands alone as a complete photographer's brief. Never reference the source image with phrases like "same as original", "as before", "like the source", or "similar to". Write as if briefing a studio that has never seen the source.
+SUBJECT AND PRODUCT FIDELITY: The core subject or product must remain unmistakably itself across all three variants. Identity is sacrosanct.
+COMMERCIAL USABILITY: Every prompt must produce an image that works in the stated campaign context on day one — not conceptually interesting, but commercially deployable.
+USER CREATIVE DIRECTION: ${userTouchInstruction}
 
-━━━ PROMPT ANATOMY ━━━
-Structure every prompt in this exact order:
-① Subject — what it is, defining visual identity, key physical characteristics
-② Camera perspective — angle, distance, lens character (85mm portrait / 35mm environmental / macro intimacy)
-③ Lighting — type, direction, quality, temperature, signature effects
-④ Setting / environment / background
-⑤ Mood, atmosphere, color grading — purpose-driven
-⑥ Color palette preservation (mandatory)
-⑦ Technical quality anchors — pick 2-3: "sharp commercial photography" · "shot on Hasselblad medium format" · "85mm f/1.4 shallow depth of field" · "Sony A7R V resolution" · "professional studio lighting" · "editorial photography quality" · "photorealistic 8K render" · "clean specular highlights, rich shadow detail" · "zero chromatic aberration"
+━━━ PROMPT ANATOMY — FOLLOW THIS EXACT SEQUENCE ━━━
+Structure every prompt with these seven components in this precise order:
 
-Target: 150-200 words per prompt. Imagen 4 performs best with photography-language-rich, technically precise prompts.
+① SUBJECT — category, defining visual identity, key physical characteristics, material properties, what makes it distinctive
+② CAMERA — angle (eye-level/low/overhead/profile), distance (macro/close-up/medium/wide environmental), lens character (85mm f/1.4 portrait compression / 35mm f/1.8 environmental / 100mm macro detail / 24mm wide establishing), depth of field specification
+③ LIGHTING — source type and setup (natural window diffuse / continuous softbox / strobe beauty dish / practical ambient), key light direction and angle, light quality (hard specular / soft wrap / bounced fill), color temperature (warm 3000K / neutral 5500K / cool 6500K), signature lighting effects (catch-lights / specular product highlights / rim separation / gradient falloff)
+④ SETTING — specific environment with concrete details, surface textures, architectural elements, spatial depth cues, background treatment
+⑤ MOOD & COLOR GRADE — emotional register, atmospheric energy, color grading character (clean neutral / lifted matte / S-curve cinematic / desaturated editorial), purpose-driven feeling
+⑥ COLOR PALETTE — explicit preservation statement with hex anchor and palette character description (mandatory every prompt)
+⑦ TECHNICAL QUALITY ANCHORS — select exactly 3 from: "sharp commercial photography" · "Hasselblad H6D medium format" · "85mm f/1.4 portrait lens" · "Sony A7R V full-frame resolution" · "Phase One IQ4 150MP" · "professional studio strobe lighting" · "editorial photography quality" · "photorealistic 8K commercial render" · "clean specular highlights with rich shadow detail" · "zero chromatic aberration" · "Leica M11 street reportage" · "Canon EOS R5 portrait mode" · "10-bit color depth commercial grade"
 
-━━━ OUTPUT ━━━
-Return ONLY a valid JSON array — no markdown, no explanation, nothing before or after the brackets:
+Target length: 160-220 words per prompt. Imagen 4 and Gemini Pro image models respond best to photography-language-rich, technically specific prompts that read like a real photographer's shoot brief.
+
+━━━ OUTPUT FORMAT ━━━
+Return ONLY a valid JSON array — no markdown, no explanation, no preamble, nothing before or after the brackets. Any non-JSON output will break the pipeline:
 [
   { "prompt": "...", "label": "2-3 word label", "dimension": "mood_vibe" },
   { "prompt": "...", "label": "2-3 word label", "dimension": "product_presentation" },
