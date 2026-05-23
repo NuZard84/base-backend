@@ -23,8 +23,10 @@ import { LoginDto } from './dto/login.dto';
 // attacks cannot distinguish "wrong password" from "email not found".
 const DUMMY_HASH = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TqznbMGjxHFPQ7t2TNJNJblZFIly';
 
-const SLIDING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const HARD_CAP_MS = 90 * 24 * 60 * 60 * 1000;       // 90 days
+// EXPIRE_REFRESH_TOKEN is in seconds (e.g. 2592000 = 30 days).
+// Falls back to 30 days if the env var is absent or not a valid number.
+const SLIDING_WINDOW_MS = (Number(process.env.EXPIRE_REFRESH_TOKEN) || 30 * 24 * 60 * 60) * 1_000;
+const HARD_CAP_MS = 90 * 24 * 60 * 60 * 1_000; // 90-day absolute ceiling — not configurable
 
 // One-time auth codes TTL: 60 seconds is generous enough for slow connections
 // but short enough that a leaked URL is useless after the user completes login.
@@ -147,7 +149,10 @@ export class AuthService implements OnModuleInit {
     // we return a plain 401 so the frontend retries with the new cookie that
     // the winning tab already set. Beyond the grace window it is treated as
     // theft and all sessions for the user are revoked.
-    const CONCURRENT_GRACE_MS = 10_000; // 10 seconds
+    // Must be larger than the frontend's cross-tab stall timeout (REFRESH_LOCK_TTL + 1 s = 16 s).
+    // At 10 s the stall-timeout retry (arriving at ~16 s) was treated as token theft and
+    // revoked ALL sessions. 20 s gives a 4-second safety margin above the 16 s stall timeout.
+    const CONCURRENT_GRACE_MS = 20_000; // 20 seconds
     if (session?.isRevoked) {
       const timeSinceRevocation = now.getTime() - session.lastUsedAt.getTime();
       if (timeSinceRevocation <= CONCURRENT_GRACE_MS) {
