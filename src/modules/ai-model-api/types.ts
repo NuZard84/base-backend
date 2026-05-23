@@ -143,3 +143,24 @@ export class VariantsResponseDto {
     variants: VariantItem[];
     error?: string;
 }
+
+// ── Extract Style ───────────────────────────────────────────────────────────────
+
+export class ExtractStyleRequestDto {
+    @IsString()
+    imageUrl: string;
+}
+
+export interface ExtractedStyle {
+    masterPrompt: string;
+    styleTitle: string;
+    colorPalette: string[];
+}
+
+export class ExtractStyleResponseDto {
+    success: boolean;
+    masterPrompt?: string;
+    styleTitle?: string;
+    colorPalette?: string[];
+    error?: string;
+}

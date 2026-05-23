@@ -9,7 +9,7 @@ import { RESOURCE_TYPES, FREE_TIER_AI_MODELS } from '../../../common/plans/plan-
 import { CreditService } from '../../../common/credits/credit.service';
 import { Throttle } from '@nestjs/throttler';
 
-import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto, VariantsRequestDto, VariantsResponseDto } from '../types';
+import { AiRequestData, AiRequestConfig, ImageGenRequestDto, ImageGenResponseDto, VariantsRequestDto, VariantsResponseDto, ExtractStyleRequestDto, ExtractStyleResponseDto } from '../types';
 
 @ApiTags('AI Gemini')
 @ApiBearerAuth('bearer')
@@ -148,6 +148,25 @@ export class GeminiController {
             );
         }
         return result;
+    }
+
+    @Post('extract-style')
+    @UseGuards(PlanGuard)
+    @CheckLimit('ai_requests')
+    @ApiOperation({ summary: 'Extract a reusable master studio prompt from an image' })
+    async extractStyle(@Body() body: ExtractStyleRequestDto, @Request() req: any): Promise<ExtractStyleResponseDto> {
+        if (!body.imageUrl?.trim()) throw new BadRequestException('imageUrl must not be empty');
+        const userId: string = req.user?.userId;
+        const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
+        await this.creditService.check(userId, costPer1k * 2);
+        try {
+            const result = await this.geminiService.extractStyle(body.imageUrl);
+            await this.planService.logUsage(userId, RESOURCE_TYPES.AI_REQUEST, 1, { type: 'extract_style' });
+            await this.creditService.deduct(userId, costPer1k * 2, 'extract_style', RESOURCE_TYPES.AI_REQUEST);
+            return { success: true, ...result };
+        } catch (error) {
+            return { success: false, error: error?.message ?? 'Style extraction failed. Please try again.' };
+        }
     }
 
     @Get('search')

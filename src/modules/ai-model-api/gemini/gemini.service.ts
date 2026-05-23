@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
-import { AiRequestData, AiRequestConfig, AiResponse, queryType, ImageGenRequestDto, ImageGenResponseDto, GeneratedImageItem, VALID_IMAGE_GEN_MODELS, VariantsRequestDto, VariantsResponseDto, ImageAnalysis, VariantItem, VariantPurpose } from '../types';
+import { AiRequestData, AiRequestConfig, AiResponse, queryType, ImageGenRequestDto, ImageGenResponseDto, GeneratedImageItem, VALID_IMAGE_GEN_MODELS, VariantsRequestDto, VariantsResponseDto, ImageAnalysis, VariantItem, VariantPurpose, ExtractedStyle, ExtractStyleRequestDto } from '../types';
 import { S3Service } from '../../attachments/s3.service';
 import { PrismaService } from 'prisma/prisma.service';
 import { normalizeTokenUsage, NormalizedTokenUsage } from '../../../common/ai/token-usage';
@@ -610,6 +610,76 @@ Generate the 3 variant prompts now.`;
             this.logger.warn(`expandForVisual failed (falling back to raw text): ${err?.message}`);
             return userText;
         }
+    }
+
+    // ── Extract Style ────────────────────────────────────────────────────────────
+
+    async extractStyle(imageUrl: string): Promise<ExtractedStyle> {
+        const fetchTimeout = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Image fetch timed out')), 15_000)
+        );
+        const fetchRes = await Promise.race([fetch(imageUrl), fetchTimeout]) as Response;
+        if (!fetchRes.ok) throw new Error(`Failed to fetch image: ${fetchRes.status}`);
+        const mimeType = (fetchRes.headers.get('content-type') ?? 'image/jpeg').split(';')[0].trim();
+        const base64 = Buffer.from(await fetchRes.arrayBuffer()).toString('base64');
+
+        const systemPrompt = `You are a world-class commercial photographer, creative director, and AI image generation prompt engineer with deep mastery of Imagen 4 Ultra and Gemini Pro image models. Your prompts are used by tier-1 brand studios and performance marketing agencies.
+
+Your task: Analyze this image and produce a MASTER STUDIO PROMPT — a fully reusable, self-contained photographer's shoot brief that captures every visual parameter of the shoot. The prompt must use [SUBJECT] as the only variable so any model, person, or product can be dropped into the same studio setup.
+
+━━━ MASTER PROMPT CONSTRUCTION RULES ━━━
+
+STRUCTURE — follow this exact sequence in the prompt:
+① [SUBJECT] position & basic characterization (keep generic — any subject fits)
+② Camera: angle, lens focal length & aperture, distance, depth of field treatment
+③ Lighting: source type & modifier (octabox/beauty dish/softbox/ring light/window), key light direction & angle, fill setup, color temperature in Kelvin, quality (hard/soft/diffused), signature effects (catch-lights/rim separation/gradient falloff/specular highlights)
+④ Environment/Background: surface type & texture, backdrop color with hex, spatial depth, props if structural
+⑤ Mood & Atmosphere: commercial emotional register, tonal contrast character, atmospheric energy
+⑥ Color Palette: state hex anchors explicitly — "palette anchored in [describe] [#hex1], [#hex2], [#hex3]"
+⑦ Technical Quality: choose 3 from — "sharp commercial photography" · "Hasselblad H6D medium format" · "85mm f/1.4 portrait lens" · "Sony A7R V full-frame resolution" · "professional studio strobe lighting" · "editorial photography quality" · "photorealistic 8K commercial render" · "clean specular highlights with rich shadow detail" · "zero chromatic aberration" · "Canon EOS R5 portrait mode" · "10-bit color depth commercial grade"
+
+ABSOLUTE RULES:
+— Use exactly "[SUBJECT]" as the placeholder — it is the ONLY variable in the entire prompt
+— NEVER include text rendering, typography, words, logos, text overlays, captions, or lettering of any kind
+— Write as a real photographer's shoot brief: technical, precise, dense — no vague adjectives
+— Self-contained: never reference "source image", "as shown", "similar to", or any prior context
+— Length: 160–220 words. Every word earns its place.
+— Extract the 4–6 dominant hex colors from the actual image pixels
+
+━━━ OUTPUT FORMAT ━━━
+Return ONLY valid JSON — no markdown, no code blocks, nothing before or after the brackets:
+{
+  "masterPrompt": "...",
+  "styleTitle": "2-4 word evocative title for this visual style",
+  "colorPalette": ["#hex1", "#hex2", "#hex3", "#hex4"]
+}`;
+
+        // gemini-2.5-pro: best multimodal reasoning on Vertex AI — strongest lighting,
+        // color science, and composition reads. Dynamic thinking (-1) lets the model
+        // allocate as many tokens as the image complexity warrants.
+        const extractTimeout = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Style extraction timed out')), 60_000)
+        );
+
+        const response = await Promise.race([
+            this.genAI.models.generateContent({
+                model: 'gemini-2.5-pro',
+                contents: [{
+                    role: 'user',
+                    parts: [
+                        { inlineData: { mimeType, data: base64 } },
+                        { text: 'Extract the master studio prompt from this image. Return only JSON.' },
+                    ],
+                }],
+                config: {
+                    systemInstruction: systemPrompt,
+                    thinkingConfig: { thinkingBudget: -1 },
+                } as any,
+            }),
+            extractTimeout,
+        ]);
+
+        return this.parseJsonSafely<ExtractedStyle>((response as any).text ?? '', 'Style extraction');
     }
 
     /**
