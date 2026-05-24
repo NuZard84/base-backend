@@ -3,7 +3,7 @@ import { GeminiService } from './gemini.service';
 import { ApiTags, ApiOperation, ApiBody, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { PlanGuard } from '../../../common/plans/plan.guard';
-import { CheckLimit, RequireFeature } from '../../../common/plans/plan.decorator';
+import { RequireFeature } from '../../../common/plans/plan.decorator';
 import { PlanService } from '../../../common/plans/plan.service';
 import { RESOURCE_TYPES, FREE_TIER_AI_MODELS } from '../../../common/plans/plan-config';
 import { CreditService } from '../../../common/credits/credit.service';
@@ -24,7 +24,6 @@ export class GeminiController {
 
     @Post('generate')
     @UseGuards(PlanGuard)
-    @CheckLimit('ai_requests')
     @ApiOperation({ summary: 'Generate AI response using Gemini' })
     @ApiBody({
         schema: {
@@ -98,7 +97,6 @@ export class GeminiController {
     @Post('generate-image')
     @UseGuards(PlanGuard)
     @RequireFeature('imageGeneration')
-    @CheckLimit('image_gen')
     @Throttle({ default: { limit: 5, ttl: 60000 } })
     @ApiOperation({ summary: 'Generate images using Imagen 4 or Gemini native image models' })
     async generateImage(@Body() body: ImageGenRequestDto, @Request() req: any): Promise<ImageGenResponseDto> {
@@ -125,7 +123,6 @@ export class GeminiController {
     @Post('generate-variants')
     @UseGuards(PlanGuard)
     @RequireFeature('imageGeneration')
-    @CheckLimit('image_gen')
     @Throttle({ default: { limit: 2, ttl: 60000 } })
     @ApiOperation({ summary: 'Analyze an image and generate 3 creative variants' })
     async generateVariants(@Body() body: VariantsRequestDto, @Request() req: any): Promise<VariantsResponseDto> {
@@ -152,7 +149,6 @@ export class GeminiController {
 
     @Post('extract-style')
     @UseGuards(PlanGuard)
-    @CheckLimit('ai_requests')
     @ApiOperation({ summary: 'Extract a reusable master studio prompt from an image' })
     async extractStyle(@Body() body: ExtractStyleRequestDto, @Request() req: any): Promise<ExtractStyleResponseDto> {
         if (!body.imageUrl?.trim()) throw new BadRequestException('imageUrl must not be empty');

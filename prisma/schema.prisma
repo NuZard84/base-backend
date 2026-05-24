@@ -493,11 +493,20 @@ model Attachment {
   entityType  String?  // e.g. "canvas", "node" - for polymorphic association
   entityId    String?  // e.g. canvasId, nodeId
 
+  // Gallery publishing
+  isPublic    Boolean   @default(false)
+  publishedAt DateTime?
+  title       String?   // Optional caption shown in gallery
+  prompt      String?   // AI prompt used (for display context)
+  likesCount  Int       @default(0)
+  viewsCount  Int       @default(0)
+
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([entityType, entityId])
   @@index([type])
+  @@index([isPublic, createdAt(sort: Desc)])
   @@map("attachments")
 }
 

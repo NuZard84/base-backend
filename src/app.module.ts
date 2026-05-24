@@ -30,6 +30,7 @@ import { NapkinModule } from './modules/napkin/napkin.module';
 import { KlingModule } from './modules/kling/kling.module';
 import { BriaModule } from './modules/bria/bria.module';
 import { AiImageModule } from './modules/ai-image/ai-image.module';
+import { GalleryModule } from './modules/gallery/gallery.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { AiImageModule } from './modules/ai-image/ai-image.module';
     KlingModule,
     BriaModule,
     AiImageModule,
+    GalleryModule,
   ],
   controllers: [AppController],
   providers: [

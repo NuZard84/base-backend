@@ -5,12 +5,9 @@
 
 export interface PlanLimits {
   maxProjects: number; // -1 = unlimited
-  maxAiTokensPerMonth: number;
-  maxImageGenPerMonth: number;
   maxStorageMb: number;
   maxNodesPerCanvas: number;
   maxCollaboratorsPerCanvas: number; // -1 = unlimited
-  maxVizoraPerMonth: number;
   maxCreditsPerMonth: number; // monthly credit grant — overridable from admin panel
 }
 
@@ -64,15 +61,14 @@ export const RESOURCE_TYPES = {
   TEXT_EDITOR: 'text_editor',
 } as const;
 
-// Limit type identifiers used by @CheckLimit decorator
+// Limit type identifiers used by @CheckLimit decorator.
+// Generation counts (ai_requests, image_gen, vizora_gen) are intentionally NOT
+// listed — those are gated by the credit system, not monthly quotas.
 export type LimitType =
   | 'projects'
-  | 'ai_requests'
-  | 'image_gen'
   | 'storage'
   | 'nodes_per_canvas'
   | 'collaborators'
-  | 'vizora_gen'
   | 'credits';
 
 // Feature keys used by @RequireFeature decorator
@@ -89,12 +85,9 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: true,
     limits: {
       maxProjects: 3,
-      maxAiTokensPerMonth: 50_000,
-      maxImageGenPerMonth: 4,
       maxStorageMb: 12,
       maxNodesPerCanvas: 250,  // cap prevents a free user from OOM-ing the Cloud Run instance
       maxCollaboratorsPerCanvas: 2,
-      maxVizoraPerMonth: 0,
       maxCreditsPerMonth: 50,
     },
     features: {
@@ -104,7 +97,7 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
       ragDocumentUpload: false,
 
       advancedAiModels: false,
-      imageGeneration: true, // FREE gets 4/month (capped by maxImageGenPerMonth limit)
+      imageGeneration: true,
       videoGeneration: false,
       prioritySupport: false,
       importChat: false,
@@ -122,12 +115,9 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: true, // shown in pricing UI as the trial plan
     limits: {
       maxProjects: 3,                 // SAME as FREE — no conflict when trial ends
-      maxAiTokensPerMonth: 100_000,
-      maxImageGenPerMonth: 8,
       maxStorageMb: 12,               // SAME as FREE — no conflict when trial ends
       maxNodesPerCanvas: -1,          // unlimited — no conflict when trial ends
       maxCollaboratorsPerCanvas: 2,   // SAME as FREE — no conflict when trial ends
-      maxVizoraPerMonth: 2,
       maxCreditsPerMonth: 150,
     },
     features: {
@@ -155,12 +145,9 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: true,
     limits: {
       maxProjects: -1,
-      maxAiTokensPerMonth: 5_000_000,
-      maxImageGenPerMonth: 80,
       maxStorageMb: 5120, // 5 GB
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: 10,
-      maxVizoraPerMonth: 50,
       maxCreditsPerMonth: 1500,
     },
     features: {
@@ -188,12 +175,9 @@ export const PLAN_CONFIG: Record<string, PlanDefinition> = {
     visible: true,
     limits: {
       maxProjects: -1,
-      maxAiTokensPerMonth: 20_000_000,
-      maxImageGenPerMonth: 160,
       maxStorageMb: 20480, // 20 GB
       maxNodesPerCanvas: -1,
       maxCollaboratorsPerCanvas: -1,
-      maxVizoraPerMonth: 120,
       maxCreditsPerMonth: 5000,
     },
     features: {

@@ -17,8 +17,6 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../auth/jwt-auth.guard';
-import { PlanGuard } from '../../../common/plans/plan.guard';
-import { CheckLimit } from '../../../common/plans/plan.decorator';
 import { QueryService } from './query.service';
 import { RagQueryDto, VectorSearchDto } from './dto/rag-query.dto';
 
@@ -29,8 +27,7 @@ export class QueryController {
   constructor(private readonly queryService: QueryService) {}
 
   @Post('query')
-  @UseGuards(JwtAuthGuard, PlanGuard)
-  @CheckLimit('ai_requests')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Query documents using retrieval-augmented generation',
     description:
@@ -44,8 +41,7 @@ export class QueryController {
   }
 
   @Post('query/stream')
-  @UseGuards(JwtAuthGuard, PlanGuard)
-  @CheckLimit('ai_requests')
+  @UseGuards(JwtAuthGuard)
   @Sse()
   @ApiOperation({
     summary: 'Stream a RAG response via Server-Sent Events',

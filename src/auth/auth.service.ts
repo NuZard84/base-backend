@@ -18,20 +18,29 @@ import { randomBytes } from 'crypto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
-// Pre-computed bcrypt hash used when a user is not found or has no password.
-// Ensures loginWithPassword always runs a full bcrypt comparison so timing
-// attacks cannot distinguish "wrong password" from "email not found".
+// Constant-time bcrypt placeholder — used when the user is missing or has no
+// password so login always runs the full bcrypt work and "wrong password" is
+// indistinguishable from "email not found" via timing.
 const DUMMY_HASH = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TqznbMGjxHFPQ7t2TNJNJblZFIly';
 
-// EXPIRE_REFRESH_TOKEN is in seconds (e.g. 2592000 = 30 days).
-// Falls back to 30 days if the env var is absent or not a valid number.
 const SLIDING_WINDOW_MS = (Number(process.env.EXPIRE_REFRESH_TOKEN) || 30 * 24 * 60 * 60) * 1_000;
-const HARD_CAP_MS = 90 * 24 * 60 * 60 * 1_000; // 90-day absolute ceiling — not configurable
+const HARD_CAP_MS = 90 * 24 * 60 * 60 * 1_000;
 
-// One-time auth codes TTL: 60 seconds is generous enough for slow connections
-// but short enough that a leaked URL is useless after the user completes login.
 const AUTH_CODE_TTL_SECONDS = 60;
 const AUTH_CODE_REDIS_PREFIX = 'auth:code:';
+
+// Fallback grace window for when the Redis successor chain isn't available
+// (Redis down, chain expired, etc.). Must exceed the frontend's cross-tab stall
+// timeout (REFRESH_LOCK_TTL + 1s = 16s).
+const CONCURRENT_GRACE_MS = 20_000;
+
+// Redis key prefix and TTL for the token successor chain.
+// Allows stale tabs (bfcache, background, slow network) to auto-recover for up
+// to TOKEN_CHAIN_TTL_SECONDS after their token was rotated — without triggering
+// false "reuse detected" logouts. The chain is consumed atomically (GETDEL) so
+// it can only be used once; a second attempt correctly falls through to theft detection.
+const TOKEN_CHAIN_PREFIX = 'token-chain:';
+const TOKEN_CHAIN_TTL_SECONDS = 300; // 5 minutes
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -46,20 +55,13 @@ export class AuthService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    // Schedule cleanup job to run daily at 2 AM
     await this.cleanupQueue.add(
       'cleanup-revoked-sessions',
       {},
       {
-        repeat: {
-          pattern: '0 2 * * *', // Daily at 2 AM
-        },
-        removeOnComplete: {
-          age: 3600, // Keep completed job for 1 hour
-        },
-        removeOnFail: {
-          age: 86400, // Keep failed job for 1 day (for debugging)
-        },
+        repeat: { pattern: '0 2 * * *' },
+        removeOnComplete: { age: 3600 },
+        removeOnFail: { age: 86400 },
       },
     );
     this.logger.log('Scheduled cleanup job: Daily at 2 AM');
@@ -83,12 +85,10 @@ export class AuthService implements OnModuleInit {
         user = await this.prisma.user.create({
           data: {
             email,
-            // Prefer Google displayName; fall back to email prefix so name is
-            // never null for new users (avoids "Unknown" in peer collaboration).
             name: profile.displayName || email.split('@')[0] || null,
             image: profile.photos?.[0]?.value || null,
             googleId: profile.id,
-            emailVerified: true, // Google has already verified the email
+            emailVerified: true,
             lastLoginAt: new Date(),
             trialEndsAt: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
             trialTier: 'STARTER',
@@ -99,7 +99,7 @@ export class AuthService implements OnModuleInit {
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
-            emailVerified: true, // idempotent backfill for pre-existing Google users
+            emailVerified: true,
             lastLoginAt: new Date(),
             image: profile.photos?.[0]?.value || user.image,
           },
@@ -133,42 +133,8 @@ export class AuthService implements OnModuleInit {
 
     const now = new Date();
 
-    // Reuse detection: token exists in DB but already revoked.
-    //
-    // Two scenarios produce this state:
-    //   A) Genuine token theft — the attacker reused a stolen token after the
-    //      legitimate user already rotated it. Revoke everything immediately.
-    //   B) Cross-tab race condition — two browser tabs simultaneously detected
-    //      an expired token and both called /refresh. The first tab succeeded
-    //      and rotated the token; the second tab's request arrives milliseconds
-    //      later carrying the now-revoked token. This is NOT theft.
-    //
-    // We distinguish them by checking how recently this session was revoked.
-    // During rotation we stamp lastUsedAt = now on the revoked row (see below).
-    // If the stamp is within the grace window it is almost certainly a race;
-    // we return a plain 401 so the frontend retries with the new cookie that
-    // the winning tab already set. Beyond the grace window it is treated as
-    // theft and all sessions for the user are revoked.
-    // Must be larger than the frontend's cross-tab stall timeout (REFRESH_LOCK_TTL + 1 s = 16 s).
-    // At 10 s the stall-timeout retry (arriving at ~16 s) was treated as token theft and
-    // revoked ALL sessions. 20 s gives a 4-second safety margin above the 16 s stall timeout.
-    const CONCURRENT_GRACE_MS = 20_000; // 20 seconds
     if (session?.isRevoked) {
-      const timeSinceRevocation = now.getTime() - session.lastUsedAt.getTime();
-      if (timeSinceRevocation <= CONCURRENT_GRACE_MS) {
-        this.logger.warn(
-          `Concurrent refresh race detected for user ${session.userId} — returning 401 for retry`,
-        );
-        throw new UnauthorizedException('Session rotated — please retry');
-      }
-      await this.prisma.session.updateMany({
-        where: { userId: session.userId, isRevoked: false },
-        data: { isRevoked: true },
-      });
-      this.logger.warn(
-        `Refresh token reuse detected for user ${session.userId} — all sessions revoked`,
-      );
-      throw new UnauthorizedException('Refresh token reuse detected — please log in again');
+      return this.handleRevokedToken(session, now);
     }
 
     if (!session) {
@@ -176,37 +142,93 @@ export class AuthService implements OnModuleInit {
     }
 
     if (session.expiresAt < now) {
-      await this.prisma.session.update({
-        where: { id: session.id },
-        data: { isRevoked: true },
-      });
+      await this.prisma.session.update({ where: { id: session.id }, data: { isRevoked: true } });
       throw new UnauthorizedException('Session expired — please log in again');
     }
 
     if (session.absoluteExpiresAt < now) {
-      await this.prisma.session.update({
-        where: { id: session.id },
-        data: { isRevoked: true },
-      });
+      await this.prisma.session.update({ where: { id: session.id }, data: { isRevoked: true } });
       throw new UnauthorizedException('Session reached maximum lifetime — please log in again');
     }
 
-    // Rotate: revoke old session, create new one.
-    // Stamp lastUsedAt = now so the concurrent-refresh grace-period check above
-    // can tell how recently this session was revoked (distinguishing a race from theft).
-    await this.prisma.session.update({
-      where: { id: session.id },
+    return this.rotateSession(session, now);
+  }
+
+  // Handles a revoked token presentation. Three paths:
+  // 1. Successor chain found in Redis → stale-tab auto-recovery (transparent, no logout).
+  // 2. Chain consumed or successor also revoked → genuine theft → revoke all sessions.
+  // 3. No chain (Redis down / TTL expired) → fall back to time-based grace window.
+  private async handleRevokedToken(
+    session: { id: string; userId: string; lastUsedAt: Date } & Record<string, any>,
+    now: Date,
+  ) {
+    let successorSessionId: string | null = null;
+    try {
+      successorSessionId = await this.redisService.getdel(`${TOKEN_CHAIN_PREFIX}${session.id}`);
+    } catch {
+      // Redis unavailable — fall through to grace-period behavior
+    }
+
+    if (successorSessionId) {
+      const successor = await this.prisma.session.findUnique({
+        where: { id: successorSessionId },
+        include: { user: true },
+      });
+
+      if (successor && !successor.isRevoked && successor.expiresAt > now && successor.absoluteExpiresAt > now) {
+        this.logger.warn(`Stale-tab auto-recovery for user ${session.userId}`);
+        return this.rotateSession(successor, now);
+      }
+
+      // Successor already revoked — chain was consumed by another party → theft
+      this.logger.warn(`Token chain consumed for user ${session.userId} — all sessions revoked`);
+      await this.prisma.session.updateMany({
+        where: { userId: session.userId, isRevoked: false },
+        data: { isRevoked: true },
+      });
+      throw new UnauthorizedException('Refresh token reuse detected — please log in again');
+    }
+
+    // No chain in Redis: fall back to time-based grace window
+    const timeSinceRevocation = now.getTime() - session.lastUsedAt.getTime();
+    if (timeSinceRevocation <= CONCURRENT_GRACE_MS) {
+      this.logger.warn(`Concurrent refresh race for user ${session.userId} — retry`);
+      throw new UnauthorizedException('Session rotated — please retry');
+    }
+
+    await this.prisma.session.updateMany({
+      where: { userId: session.userId, isRevoked: false },
+      data: { isRevoked: true },
+    });
+    this.logger.warn(`Refresh token reuse detected for user ${session.userId} — all sessions revoked`);
+    throw new UnauthorizedException('Refresh token reuse detected — please log in again');
+  }
+
+  // Atomically revokes the given session, creates a new one, stores the successor
+  // chain in Redis, and returns fresh tokens. The atomic updateMany (isRevoked: false
+  // guard) prevents a double-rotation race where two concurrent requests both pass
+  // findUnique before either revokes the session.
+  private async rotateSession(
+    session: { id: string; userId: string; absoluteExpiresAt: Date; user: { id: string; email: string } },
+    now: Date,
+  ) {
+    const revoked = await this.prisma.session.updateMany({
+      where: { id: session.id, isRevoked: false },
       data: { isRevoked: true, lastUsedAt: now },
     });
 
+    if (revoked.count === 0) {
+      // Lost a concurrent rotation race — ask the client to retry with the new cookie
+      throw new UnauthorizedException('Session rotated — please retry');
+    }
+
     const newRefreshToken = uuidv4();
     const slidingExpiry = new Date(now.getTime() + SLIDING_WINDOW_MS);
-    // Sliding window capped at absolute max
     const newExpiry = new Date(
       Math.min(slidingExpiry.getTime(), session.absoluteExpiresAt.getTime()),
     );
 
-    await this.prisma.session.create({
+    const newSession = await this.prisma.session.create({
       data: {
         userId: session.userId,
         token: newRefreshToken,
@@ -215,6 +237,18 @@ export class AuthService implements OnModuleInit {
         lastUsedAt: now,
       },
     });
+
+    // Store successor chain so a stale tab presenting the old token can auto-recover
+    // within TOKEN_CHAIN_TTL_SECONDS without triggering a false "theft" revocation.
+    try {
+      await this.redisService.set(
+        `${TOKEN_CHAIN_PREFIX}${session.id}`,
+        newSession.id,
+        TOKEN_CHAIN_TTL_SECONDS,
+      );
+    } catch {
+      // Non-critical — falls back to grace-period behavior on next revoked-token check
+    }
 
     const newAccessToken = this.jwtService.sign(
       { sub: session.user.id, email: session.user.email },
@@ -288,18 +322,13 @@ export class AuthService implements OnModuleInit {
   async loginWithPassword(dto: LoginDto): Promise<{ code: string; user: object }> {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
 
-    // Always run bcrypt.compare to prevent timing attacks regardless of whether
-    // the user exists or has a password. DUMMY_HASH is a valid bcrypt hash that
-    // never matches any real password — it forces the full CPU work every time.
-    // The try/catch guards against a malformed DUMMY_HASH throwing instead of
-    // returning false, which would silently skip the timing protection.
+    // Constant-time response — run bcrypt even on miss so timing can't distinguish cases.
     if (!user) {
       try { await bcrypt.compare(dto.password, DUMMY_HASH); } catch {}
       throw new UnauthorizedException('Invalid email or password.');
     }
 
     if (!user.passwordHash) {
-      // Google-only account — still do full bcrypt work for constant time
       try { await bcrypt.compare(dto.password, DUMMY_HASH); } catch {}
       throw new UnauthorizedException(
         'This account uses Google Sign-In. Please sign in with Google instead.',
@@ -377,26 +406,18 @@ export class AuthService implements OnModuleInit {
   }
 
   async resendVerification(email: string): Promise<{ message: string }> {
-    // Always return the same message to prevent user enumeration
+    // Generic response on every path to prevent user enumeration.
     const genericResponse = {
-      message:
-        "If that email is registered and unverified, we've sent a new verification link.",
+      message: "If that email is registered and unverified, we've sent a new verification link.",
     };
 
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || user.emailVerified || !user.passwordHash) {
-      return genericResponse;
-    }
+    if (!user || user.emailVerified || !user.passwordHash) return genericResponse;
 
-    // Redis rate limit: one resend per user per 5 minutes.
-    // If Redis is unavailable we skip rate-limiting rather than 500ing.
     const rateLimitKey = `verify:resend:${user.id}`;
     try {
-      const limited = await this.redisService.get(rateLimitKey);
-      if (limited) return genericResponse;
-    } catch {
-      // Redis unavailable — proceed without rate-limit enforcement
-    }
+      if (await this.redisService.get(rateLimitKey)) return genericResponse;
+    } catch {}
 
     const { token: verifyToken, expiry: verifyTokenExpiry } = this.generateVerifyToken();
     await this.prisma.user.update({
@@ -407,43 +428,31 @@ export class AuthService implements OnModuleInit {
     const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000')
       .split(',')[0]
       .trim();
-    const verifyUrl = `${frontendUrl}/auth/verify-email?token=${verifyToken}`;
 
     void this.emailService.sendEmailVerification({
       toEmail: user.email,
       userName: user.name ?? user.email.split('@')[0],
-      verifyUrl,
+      verifyUrl: `${frontendUrl}/auth/verify-email?token=${verifyToken}`,
     });
 
-    try {
-      await this.redisService.set(rateLimitKey, '1', 300); // 5-minute cooldown
-    } catch {
-      // Redis unavailable — rate-limit won't persist but email was already sent
-    }
+    try { await this.redisService.set(rateLimitKey, '1', 300); } catch {}
     this.logger.log(`Verification email resent to: ${user.email}`);
     return genericResponse;
   }
 
   async forgotPassword(email: string): Promise<{ message: string }> {
-    // Always return the same generic message to prevent user enumeration
+    // Generic response on every path to prevent user enumeration.
     const genericResponse = {
       message: "If that email is registered, we've sent a password reset link.",
     };
 
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || !user.passwordHash) {
-      // Not found, or Google-only account (no password to reset)
-      return genericResponse;
-    }
+    if (!user || !user.passwordHash) return genericResponse;
 
-    // Redis rate limit: one reset email per user per 5 minutes
     const rateLimitKey = `pwd:reset:${user.id}`;
     try {
-      const limited = await this.redisService.get(rateLimitKey);
-      if (limited) return genericResponse;
-    } catch {
-      // Redis unavailable — skip rate limiting
-    }
+      if (await this.redisService.get(rateLimitKey)) return genericResponse;
+    } catch {}
 
     const { token: resetToken, expiry: resetTokenExpiry } = this.generateResetToken();
     await this.prisma.user.update({
@@ -454,20 +463,14 @@ export class AuthService implements OnModuleInit {
     const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000')
       .split(',')[0]
       .trim();
-    const resetUrl = `${frontendUrl}/auth/reset-password?token=${resetToken}`;
 
     void this.emailService.sendPasswordReset({
       toEmail: user.email,
       userName: user.name ?? user.email.split('@')[0],
-      resetUrl,
+      resetUrl: `${frontendUrl}/auth/reset-password?token=${resetToken}`,
     });
 
-    try {
-      await this.redisService.set(rateLimitKey, '1', 300); // 5-minute cooldown
-    } catch {
-      // Redis unavailable — rate-limit won't persist
-    }
-
+    try { await this.redisService.set(rateLimitKey, '1', 300); } catch {}
     this.logger.log(`Password reset email sent to: ${user.email}`);
     return genericResponse;
   }
@@ -491,14 +494,10 @@ export class AuthService implements OnModuleInit {
 
     await this.prisma.user.update({
       where: { id: user.id },
-      data: {
-        passwordHash,
-        resetToken: null,
-        resetTokenExpiry: null,
-      },
+      data: { passwordHash, resetToken: null, resetTokenExpiry: null },
     });
 
-    // Revoke all active sessions — password change must invalidate existing logins
+    // Password change must invalidate every existing login.
     await this.prisma.session.updateMany({
       where: { userId: user.id, isRevoked: false },
       data: { isRevoked: true },
@@ -509,27 +508,24 @@ export class AuthService implements OnModuleInit {
   }
 
   private generateResetToken(): { token: string; expiry: Date } {
-    const token = randomBytes(32).toString('hex'); // 256-bit URL-safe hex token
-    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-    return { token, expiry };
+    return {
+      token: randomBytes(32).toString('hex'),
+      expiry: new Date(Date.now() + 60 * 60 * 1000),
+    };
   }
 
   private generateVerifyToken(): { token: string; expiry: Date } {
-    const token = randomBytes(32).toString('hex'); // 256-bit URL-safe hex token
-    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
-    return { token, expiry };
+    return {
+      token: randomBytes(32).toString('hex'),
+      expiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    };
   }
 
-  // Strip fields that must never leave the server: passwordHash, raw verify tokens.
-  // Called before any user object is embedded in a JWT payload, Redis code, or
-  // HTTP response — so sensitive data cannot reach the browser or be stored in
-  // localStorage via the Zustand auth store.
+  // Strip server-only fields before any user object reaches the browser.
   private sanitizeUser(user: Record<string, any>): object {
     const { passwordHash, verifyToken, verifyTokenExpiry, ...safe } = user;
     return safe;
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
 
   async logout(refreshToken: string) {
     if (!refreshToken) return;
@@ -539,7 +535,7 @@ export class AuthService implements OnModuleInit {
         data: { isRevoked: true },
       });
     } catch {
-      // Silent fail — logout should always succeed from the user's perspective
+      // Logout must appear to succeed even if the DB write fails.
     }
   }
 
@@ -589,12 +585,8 @@ export class AuthService implements OnModuleInit {
     return token;
   }
 
-  // ── One-time auth code exchange ───────────────────────────────────────────
-  // After OAuth completes, the tokens are NOT passed through the browser URL.
-  // Instead the callback stores them in Redis under a short-lived opaque code
-  // and the Next.js set-session route exchanges the code server-to-server.
-  // This prevents tokens from ever appearing in browser history, server logs,
-  // or Referer headers.
+  // One-time auth code exchange — keeps tokens out of URLs, history, and Referer
+  // headers across the OAuth/login redirect chain.
 
   async createAuthCode(payload: {
     accessToken: string;
@@ -614,28 +606,16 @@ export class AuthService implements OnModuleInit {
     code: string,
   ): Promise<{ accessToken: string; refreshToken: string; user: object }> {
     const raw = await this.redisService.getdel(`${AUTH_CODE_REDIS_PREFIX}${code}`);
-    if (!raw) {
-      // Code not found — expired, already used, or forged
-      throw new UnauthorizedException('Invalid or expired auth code');
-    }
+    if (!raw) throw new UnauthorizedException('Invalid or expired auth code');
     return JSON.parse(raw);
   }
-  // ─────────────────────────────────────────────────────────────────────────
 
-  // Called by BullMQ processor daily at 2 AM
   async cleanupRevokedSessions() {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
     try {
       const deleted = await this.prisma.session.deleteMany({
-        where: {
-          isRevoked: true,
-          createdAt: {
-            lt: sevenDaysAgo,
-          },
-        },
+        where: { isRevoked: true, createdAt: { lt: sevenDaysAgo } },
       });
-
       this.logger.log(
         `Cleanup completed: Deleted ${deleted.count} revoked sessions older than 7 days`,
       );

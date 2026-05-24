@@ -7,6 +7,7 @@ import { VectorSearchService } from '../vector-search/vector-search.service';
 import { PromptBuilderService, ContextSource } from './prompt-builder.service';
 import { RagQueryDto, VectorSearchDto } from './dto/rag-query.dto';
 import { PlanService } from '../../../common/plans/plan.service';
+import { CreditService } from '../../../common/credits/credit.service';
 import { RESOURCE_TYPES } from '../../../common/plans/plan-config';
 import { normalizeTokenUsage } from '../../../common/ai/token-usage';
 
@@ -43,6 +44,7 @@ export class QueryService {
     private readonly vectorSearch: VectorSearchService,
     private readonly promptBuilder: PromptBuilderService,
     private readonly planService: PlanService,
+    private readonly creditService: CreditService,
   ) {
     const apiKey = this.config.get<string>('GEMINI_API_KEY');
     if (apiKey) {
@@ -56,6 +58,9 @@ export class QueryService {
 
   async query(userId: string, dto: RagQueryDto): Promise<RagQueryResponse> {
     this.ensureConfigured();
+
+    const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
+    await this.creditService.check(userId, costPer1k);
 
     const t0 = Date.now();
 
@@ -127,6 +132,18 @@ export class QueryService {
       tokenUsage?.totalTokens,
     ).catch((err) => this.logger.warn(`Failed to log RAG usage: ${err.message}`));
 
+    const tokens = tokenUsage?.totalTokens ?? 0;
+    if (tokens > 0) {
+      this.creditService
+        .deduct(
+          userId,
+          Math.ceil(tokens / 1000) * costPer1k,
+          `rag_query:${model}`,
+          RESOURCE_TYPES.AI_REQUEST,
+        )
+        .catch((err) => this.logger.warn(`Failed to deduct RAG credits: ${err.message}`));
+    }
+
     this.logger.log(
       `RAG query done queryId=${ragQuery.id} chunks=${chunks.length} ` +
         `retrieval=${retrievalTimeMs}ms generation=${generationTimeMs}ms`,
@@ -166,6 +183,9 @@ export class QueryService {
     dto: RagQueryDto,
     subject: Subject<MessageEvent>,
   ): Promise<void> {
+    const costPer1k = await this.creditService.getCost('ai_request_per_1k_tokens');
+    await this.creditService.check(userId, costPer1k);
+
     // 1. Retrieve + build context (same as non-streaming)
     const t0 = Date.now();
     const chunks = await this.vectorSearch.search(dto.query, {
@@ -248,6 +268,18 @@ export class QueryService {
       { source: 'rag_stream', model, queryId: ragQuery.id },
       tokenUsage?.totalTokens,
     ).catch((err) => this.logger.warn(`Failed to log RAG stream usage: ${err.message}`));
+
+    const tokens = tokenUsage?.totalTokens ?? 0;
+    if (tokens > 0) {
+      this.creditService
+        .deduct(
+          userId,
+          Math.ceil(tokens / 1000) * costPer1k,
+          `rag_stream:${model}`,
+          RESOURCE_TYPES.AI_REQUEST,
+        )
+        .catch((err) => this.logger.warn(`Failed to deduct RAG stream credits: ${err.message}`));
+    }
 
     subject.next(this.sseEvent({ type: 'done', queryId: ragQuery.id } satisfies StreamChunk));
     subject.complete();

@@ -230,40 +230,6 @@ export class PlanService {
         break;
       }
 
-      case 'ai_requests': {
-        const limit = plan.limits.maxAiTokensPerMonth;
-        if (limit === -1) return;
-        const current = await this.countMonthlyAiTokens(userId);
-        if (current >= limit) {
-          throw new ForbiddenException({
-            code: 'PLAN_LIMIT_EXCEEDED',
-            limitType: 'ai_requests',
-            current,
-            limit,
-            resetAt: this.getMonthEnd().toISOString(),
-            message: `You've used ${current.toLocaleString()} of your ${limit.toLocaleString()} monthly AI tokens. Resets on ${this.getMonthEnd().toLocaleDateString()}.`,
-          });
-        }
-        break;
-      }
-
-      case 'image_gen': {
-        const limit = plan.limits.maxImageGenPerMonth;
-        if (limit === -1) return;
-        const current = await this.countMonthlyImageGen(userId);
-        if (current >= limit) {
-          throw new ForbiddenException({
-            code: 'PLAN_LIMIT_EXCEEDED',
-            limitType: 'image_gen',
-            current,
-            limit,
-            resetAt: this.getMonthEnd().toISOString(),
-            message: `You've used all your image generations this month (${current}/${limit}). Resets on ${this.getMonthEnd().toLocaleDateString()}.`,
-          });
-        }
-        break;
-      }
-
       case 'storage': {
         const limit = plan.limits.maxStorageMb;
         if (limit === -1) return;
@@ -314,22 +280,6 @@ export class PlanService {
         break;
       }
 
-      case 'vizora_gen': {
-        const limit = plan.limits.maxVizoraPerMonth;
-        if (limit === -1) return;
-        const current = await this.countMonthlyVizora(userId);
-        if (current >= limit) {
-          throw new ForbiddenException({
-            code: 'PLAN_LIMIT_EXCEEDED',
-            limitType: 'vizora_gen',
-            current,
-            limit,
-            resetAt: this.getMonthEnd().toISOString(),
-            message: `You've used all your Vizora Infographic Visuals this month (${current}/${limit}). Resets on ${this.getMonthEnd().toLocaleDateString()}.`,
-          });
-        }
-        break;
-      }
     }
   }
 
@@ -387,30 +337,14 @@ export class PlanService {
       this.countMonthlyVizora(userId),
     ]);
 
+    // Generation counts are credit-gated, not quota-gated — limit=-1 (unlimited)
+    // so existing consumers see "no cap" while the credit balance does the work.
     return {
-      projects: {
-        current: projects,
-        limit: plan.limits.maxProjects,
-      },
-      aiRequests: {
-        current: aiTokens,
-        limit: plan.limits.maxAiTokensPerMonth,
-        resetAt,
-      },
-      imageGen: {
-        current: imageGen,
-        limit: plan.limits.maxImageGenPerMonth,
-        resetAt,
-      },
-      storageMb: {
-        current: storageMb,
-        limit: plan.limits.maxStorageMb,
-      },
-      vizoraGen: {
-        current: vizoraGen,
-        limit: plan.limits.maxVizoraPerMonth,
-        resetAt,
-      },
+      projects: { current: projects, limit: plan.limits.maxProjects },
+      aiRequests: { current: aiTokens, limit: -1, resetAt },
+      imageGen: { current: imageGen, limit: -1, resetAt },
+      storageMb: { current: storageMb, limit: plan.limits.maxStorageMb },
+      vizoraGen: { current: vizoraGen, limit: -1, resetAt },
     };
   }
 

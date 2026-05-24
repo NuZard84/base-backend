@@ -9,6 +9,7 @@ import {
 import { KlingAuthService } from './kling-auth.service';
 import { KlingPollerService, KlingTaskFailedError, KlingTaskTimeoutError } from './kling-poller.service';
 import { S3Service } from '../attachments/s3.service';
+import { PrismaService } from 'prisma/prisma.service';
 import { KLING_MODELS, type KlingModelId, type KlingMode, type KlingDuration } from './constants/kling-models';
 import type { TextToVideoDto } from './dto/text-to-video.dto';
 import type { ImageToVideoDto } from './dto/image-to-video.dto';
@@ -42,6 +43,7 @@ export class KlingService {
     private readonly auth: KlingAuthService,
     private readonly poller: KlingPollerService,
     private readonly s3: S3Service,
+    private readonly prisma: PrismaService,
   ) {}
 
   // ─── Task creation ──────────────────────────────────────────────────────────
@@ -229,6 +231,26 @@ export class KlingService {
 
     await this.s3.upload({ key, body: buffer, contentType: 'video/mp4' });
     this.logger.log(`[S3] Saved video task=${taskId} key=${key}`);
+
+    // Persist an Attachment row so the gallery / publish pipeline can reference it.
+    // Idempotent on the unique `key` column — re-saves just no-op.
+    try {
+      await this.prisma.attachment.upsert({
+        where: { key },
+        update: {},
+        create: {
+          userId,
+          key,
+          filename: `${taskId}.mp4`,
+          mimeType: 'video/mp4',
+          sizeBytes: buffer.length,
+          type: 'OTHER',
+          entityType: 'generated_video',
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`[Attachment] Failed to persist video attachment for key=${key}: ${(err as Error).message}`);
+    }
 
     const url = await this.s3.getPresignedUrl({ key, expiresIn: 604800, disposition: 'inline' });
     return { url, s3Key: key };

@@ -35,7 +35,6 @@ export class NapkinController {
     async generate(@Req() req: any, @Body() dto: GenerateVisualDto) {
         const userId = req.user?.userId ?? req.user?.id;
         await this.planService.requireFeature(userId, 'vizoraInfographic');
-        await this.planService.checkLimit(userId, 'vizora_gen');
         const cost = await this.creditService.getCost('vizora_gen');
         await this.creditService.check(userId, cost);
         const result = await this.napkinService.createVisualRequest(dto);
