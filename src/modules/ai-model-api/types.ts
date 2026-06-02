@@ -40,8 +40,10 @@ export const VALID_IMAGE_GEN_MODELS = [
     'imagen-4.0-generate-001',
     'imagen-4.0-ultra-generate-001',
     'imagen-4.0-fast-generate-001',
-    'gemini-3.1-flash-image-preview',
-    'gemini-3-pro-image-preview',
+    'gemini-3.1-flash-image',           // stable GA (was gemini-3.1-flash-image-preview)
+    'gemini-3.1-flash-image-preview',   // kept for backwards compat
+    'gemini-3-pro-image',               // stable GA (was gemini-3-pro-image-preview)
+    'gemini-3-pro-image-preview',       // kept for backwards compat
     'gemini-2.5-flash-image',
 ] as const;
 

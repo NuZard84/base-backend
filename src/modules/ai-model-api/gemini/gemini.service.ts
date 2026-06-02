@@ -557,7 +557,7 @@ Generate the 3 variant prompts now.`;
                 variantDefs.map(def =>
                     this.generateImage({
                         prompt: def.prompt,
-                        model: 'gemini-3-pro-image-preview',
+                        model: 'gemini-3-pro-image',
                         canvasId: dto.canvasId,
                         aspectRatio: dto.aspectRatio ?? '1:1',
                         numberOfImages: 1,
