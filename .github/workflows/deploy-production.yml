@@ -112,6 +112,7 @@ jobs:
             --image ${{ env.IMAGE }} \
             --region ${{ env.REGION }} \
             --platform managed \
+            --allow-unauthenticated \
             --session-affinity \
             --timeout 3600 \
             --min-instances=1 \
