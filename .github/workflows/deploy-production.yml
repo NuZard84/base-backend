@@ -1,5 +1,6 @@
 name: Deploy to Production
 
+# Retrying deploy after GCP migration secret fix (2026-08-16).
 on:
   push:
     branches: [main]
