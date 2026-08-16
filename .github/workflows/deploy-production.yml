@@ -5,9 +5,9 @@ on:
     branches: [main]
 
 env:
-  GCP_PROJECT_ID: base-backend-495802
+  GCP_PROJECT_ID: base-backend-migr01
   REGION: us-central1
-  IMAGE: us-central1-docker.pkg.dev/base-backend-495802/base-backend-2026/base-backend:latest
+  IMAGE: us-central1-docker.pkg.dev/base-backend-migr01/base-backend-2026/base-backend:latest
   SERVICE: base-backend
 
 jobs:
